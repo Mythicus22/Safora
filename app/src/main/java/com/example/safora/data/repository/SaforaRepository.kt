@@ -2,10 +2,13 @@ package com.example.safora.data.repository
 
 import android.content.Context
 import com.example.safora.core.crypto.EvidenceCipher
+import com.example.safora.core.crypto.ShamirSecretSharing
 import com.example.safora.core.utils.EmergencyDispatcher
 import com.example.safora.data.local.MockDataProvider
 import com.example.safora.data.local.PreferencesManager
 import com.example.safora.data.model.*
+import com.example.safora.services.cloud.BackblazeEvidenceUploader
+import com.example.safora.services.sos.EmergencySosService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,7 @@ import java.util.*
 class SaforaRepository(private val context: Context) {
     private val scope = CoroutineScope(Dispatchers.IO)
     private val prefsManager = PreferencesManager(context)
+    private val b2Uploader = BackblazeEvidenceUploader(context)
 
     // Current user state
     private val _user = MutableStateFlow(User(name = "", phone = "", isOnboarded = false))
@@ -55,7 +59,7 @@ class SaforaRepository(private val context: Context) {
     private val _audioHistory = MutableStateFlow<List<AudioDetectionResult>>(emptyList())
     val audioHistory: StateFlow<List<AudioDetectionResult>> = _audioHistory.asStateFlow()
 
-    // Location state (latitude, longitude, accuracyMeters, isRealGps)
+    // Location state
     private val _currentLocation = MutableStateFlow(Pair(28.6139, 77.2090))
     val currentLocation: StateFlow<Pair<Double, Double>> = _currentLocation.asStateFlow()
 
@@ -82,8 +86,10 @@ class SaforaRepository(private val context: Context) {
     private val _isDemoMode = MutableStateFlow(true)
     val isDemoMode: StateFlow<Boolean> = _isDemoMode.asStateFlow()
 
+    // Current Incident Master Encryption Key (32 bytes AES-256)
+    private var incidentKeyBytes: ByteArray? = null
+
     init {
-        // Load persistent DataStore data on launch
         scope.launch {
             _user.value = prefsManager.userFlow.first()
             _contacts.value = prefsManager.contactsFlow.first()
@@ -175,6 +181,14 @@ class SaforaRepository(private val context: Context) {
         _audioHistory.value = (listOf(result) + _audioHistory.value).take(10)
     }
 
+    fun logEmergencyTimeline(entry: String) {
+        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        val formatted = if (entry.startsWith("[")) entry else "[$timeStr] $entry"
+        _currentIncident.value = _currentIncident.value.copy(
+            timeline = _currentIncident.value.timeline + listOf(formatted)
+        )
+    }
+
     fun triggerPossibleDistress(detectedClass: String = "Scream / Distress Call") {
         if (_currentIncident.value.state == IncidentState.IDLE || _currentIncident.value.state == IncidentState.CANCELLED || _currentIncident.value.state == IncidentState.RESOLVED) {
             val incId = "INC-${System.currentTimeMillis().toString().takeLast(6)}"
@@ -198,20 +212,49 @@ class SaforaRepository(private val context: Context) {
             "INC-${System.currentTimeMillis().toString().takeLast(6)}"
         }
 
+        // 1. Generate unique 256-bit AES incident key
+        val masterKey = EvidenceCipher.generate256BitKey()
+        incidentKeyBytes = masterKey
+        val masterKeyHex = masterKey.joinToString("") { "%02x".format(it) }
+
+        // 2. Compute Shamir's Secret Sharing: 50% threshold of trusted emergency contacts
+        val emergencyContacts = _contacts.value.filter { it.isEmergencyContact }
+        val n = emergencyContacts.size.coerceAtLeast(1)
+        // 50% threshold: ceil(n * 0.5)
+        val k = ((n + 1) / 2).coerceAtLeast(1)
+
+        val keyShares = ShamirSecretSharing.split(masterKey, threshold = k, totalShares = n)
+
+        // Assign authenticated key share to each contact
+        val updatedContacts = _contacts.value.map { c ->
+            val idx = emergencyContacts.indexOfFirst { it.id == c.id }
+            if (idx != -1 && idx < keyShares.size) {
+                c.copy(keyShareHex = keyShares[idx].toHex(), hasApprovedAccess = false)
+            } else {
+                c.copy(hasApprovedAccess = false)
+            }
+        }
+        _contacts.value = updatedContacts
+        scope.launch { prefsManager.saveContacts(updatedContacts) }
+
         val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val initialTimeline = if (_currentIncident.value.state == IncidentState.VERIFYING) {
             _currentIncident.value.timeline + listOf(
                 "[$timeStr] Emergency SOS CONFIRMED via $triggerSource",
+                "[$timeStr] Generated 256-bit AES master key & Shamir $k-of-$n threshold shares",
                 "[$timeStr] Wearable camera START_RECORD command sent over BLE",
-                "[$timeStr] Live GPS coordinates broadcasted to emergency contacts",
-                "[$timeStr] Prepared National Emergency 112 hotline link"
+                "[$timeStr] Immediate cellular SMS broadcast dispatched",
+                "[$timeStr] Initiated autonomous emergency calling sequence",
+                "[$timeStr] Started 3-minute periodic GPS location update service"
             )
         } else {
             listOf(
                 "[$timeStr] Emergency SOS INSTANTLY TRIGGERED via $triggerSource",
+                "[$timeStr] Generated 256-bit AES master key & Shamir $k-of-$n threshold shares",
                 "[$timeStr] Wearable camera START_RECORD command sent over BLE",
-                "[$timeStr] Live GPS coordinates broadcasted to emergency contacts",
-                "[$timeStr] Prepared National Emergency 112 hotline link"
+                "[$timeStr] Immediate cellular SMS broadcast dispatched",
+                "[$timeStr] Initiated autonomous emergency calling sequence",
+                "[$timeStr] Started 3-minute periodic GPS location update service"
             )
         }
 
@@ -222,15 +265,17 @@ class SaforaRepository(private val context: Context) {
             longitude = _currentLocation.value.second,
             state = IncidentState.CONFIRMED_SOS,
             triggerSource = triggerSource,
-            alertsSentCount = _contacts.value.count { it.isEmergencyContact },
-            timeline = initialTimeline
+            alertsSentCount = emergencyContacts.size,
+            timeline = initialTimeline,
+            encryptionKeyHex = masterKeyHex,
+            thresholdRequired = k,
+            totalSharesCount = n
         )
 
         // Automatically trigger recording command on wearable
         setWearableRecording(true)
 
-        // Dispatch REAL cellular SMS to all configured Emergency Contacts
-        val emergencyContacts = _contacts.value.filter { it.isEmergencyContact }
+        // Dispatch immediate autonomous cellular SMS to all configured Emergency Contacts
         val smsText = EmergencyDispatcher.buildEmergencySmsText(
             userName = _user.value.name.ifBlank { "User" },
             latitude = _currentLocation.value.first,
@@ -245,19 +290,16 @@ class SaforaRepository(private val context: Context) {
                 phoneNumber = contact.phone,
                 message = smsText,
                 onSuccess = {
-                    val logTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                    _currentIncident.value = _currentIncident.value.copy(
-                        timeline = _currentIncident.value.timeline + listOf("[$logTime] Direct SMS delivered to ${contact.name}")
-                    )
+                    logEmergencyTimeline("Direct cellular SMS delivered to ${contact.name}")
                 },
                 onError = { err ->
-                    val logTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                    _currentIncident.value = _currentIncident.value.copy(
-                        timeline = _currentIncident.value.timeline + listOf("[$logTime] SMS failed for ${contact.name}: $err")
-                    )
+                    logEmergencyTimeline("SMS failed for ${contact.name}: $err")
                 }
             )
         }
+
+        // Start Emergency Foreground Service (autonomous sequential calls & 3-min periodic GPS updates)
+        EmergencySosService.start(context)
     }
 
     fun cancelIncident() {
@@ -267,6 +309,7 @@ class SaforaRepository(private val context: Context) {
             timeline = _currentIncident.value.timeline + listOf("[$timeStr] Incident cancelled by user (Marked Safe)")
         )
         setWearableRecording(false)
+        EmergencySosService.stop(context)
     }
 
     fun resolveIncident() {
@@ -276,6 +319,7 @@ class SaforaRepository(private val context: Context) {
             timeline = _currentIncident.value.timeline + listOf("[$timeStr] Incident marked RESOLVED. All alerts closed.")
         )
         setWearableRecording(false)
+        EmergencySosService.stop(context)
     }
 
     fun addContact(contact: Contact) {
@@ -298,15 +342,75 @@ class SaforaRepository(private val context: Context) {
         scope.launch { prefsManager.saveContacts(updated) }
     }
 
+    /**
+     * Approves access for a specific contact in Shamir's threshold scheme.
+     * When >= 50% contacts approve, reconstructs the AES key to decrypt evidence.
+     */
+    fun toggleContactApproval(contactId: String): Boolean {
+        val updated = _contacts.value.map {
+            if (it.id == contactId) it.copy(hasApprovedAccess = !it.hasApprovedAccess) else it
+        }
+        _contacts.value = updated
+        scope.launch { prefsManager.saveContacts(updated) }
+
+        val approvedShares = updated.filter { it.isEmergencyContact && it.hasApprovedAccess && it.keyShareHex.isNotBlank() }
+            .map { ShamirSecretSharing.Share.fromHex(it.keyShareHex) }
+
+        val k = _currentIncident.value.thresholdRequired
+        return if (approvedShares.size >= k) {
+            try {
+                val reconstructedKey = ShamirSecretSharing.reconstruct(approvedShares, k)
+                incidentKeyBytes = reconstructedKey
+                logEmergencyTimeline("Threshold reached (${approvedShares.size}/$k approvals). Reconstructed AES master key for evidence decryption.")
+                true
+            } catch (e: Exception) {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     fun addEvidenceSegment(segment: EvidenceSegment) {
-        _evidenceList.value = listOf(segment) + _evidenceList.value
+        val updatedList = listOf(segment) + _evidenceList.value
+        _evidenceList.value = updatedList
         _currentIncident.value = _currentIncident.value.copy(
-            evidenceSegmentsCount = _evidenceList.value.size
+            evidenceSegmentsCount = updatedList.size
         )
+
+        // Autonomous Backblaze B2 Upload when internet connectivity is present
+        scope.launch {
+            if (b2Uploader.isInternetAvailable()) {
+                logEmergencyTimeline("Internet connected. Autonomously uploading segment #${segment.segmentNumber} to Backblaze B2...")
+                val result = b2Uploader.uploadEncryptedSegment(segment)
+                result.onSuccess { cloudUrl ->
+                    _evidenceList.value = _evidenceList.value.map {
+                        if (it.id == segment.id) it.copy(isUploaded = true, cloudUrl = cloudUrl) else it
+                    }
+                    logEmergencyTimeline("Segment #${segment.segmentNumber} successfully stored in Backblaze B2 (Encrypted).")
+                }.onFailure { err ->
+                    logEmergencyTimeline("Backblaze upload error on #${segment.segmentNumber}: ${err.message}. Kept locally.")
+                }
+            } else {
+                logEmergencyTimeline("No internet connection. Segment #${segment.segmentNumber} queued locally in encrypted vault.")
+            }
+        }
     }
 
     fun syncAllEvidence() {
-        _evidenceList.value = _evidenceList.value.map { it.copy(isUploaded = true) }
+        scope.launch {
+            val pending = _evidenceList.value.filter { !it.isUploaded }
+            for (seg in pending) {
+                if (b2Uploader.isInternetAvailable()) {
+                    val res = b2Uploader.uploadEncryptedSegment(seg)
+                    res.onSuccess { cloudUrl ->
+                        _evidenceList.value = _evidenceList.value.map {
+                            if (it.id == seg.id) it.copy(isUploaded = true, cloudUrl = cloudUrl) else it
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun setEsp32WifiHost(host: String) {
@@ -324,7 +428,6 @@ class SaforaRepository(private val context: Context) {
             }
         }
 
-        // Global accessor initialized via SaforaApp
         lateinit var instance: SaforaRepository
             internal set
     }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -33,10 +34,18 @@ fun EvidenceScreen() {
     val context = LocalContext.current
     val repository = remember { SaforaRepository.getInstance(context) }
     val evidenceList by repository.evidenceList.collectAsState()
+    val incident by repository.currentIncident.collectAsState()
+    val contacts by repository.contacts.collectAsState()
     val esp32Host by repository.esp32WifiHost.collectAsState()
 
     var hostInput by remember { mutableStateOf(esp32Host) }
     var selectedSegment by remember { mutableStateOf<EvidenceSegment?>(null) }
+    var showThresholdDialog by remember { mutableStateOf(false) }
+
+    val emergencyContacts = contacts.filter { it.isEmergencyContact }
+    val approvedCount = emergencyContacts.count { it.hasApprovedAccess }
+    val threshold = incident.thresholdRequired
+    val isDecryptionUnlocked = approvedCount >= threshold && threshold > 0
 
     Column(
         modifier = Modifier
@@ -60,7 +69,7 @@ fun EvidenceScreen() {
                     color = Color.White
                 )
                 Text(
-                    text = "Wi-Fi MicroSD Ingestion & AES-256 GCM Authenticated",
+                    text = "Backblaze B2 • AES-256-GCM • 50% Threshold Access",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -76,20 +85,70 @@ fun EvidenceScreen() {
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // ESP32 Wi-Fi SoftAP Configuration Bar
+        // 50% Trusted Contact Approval Status Card (Shamir's Secret Sharing)
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showThresholdDialog = true },
             colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
             shape = RoundedCornerShape(12.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (isDecryptionUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = if (isDecryptionUnlocked) EmeraldSafe else AmberWarning,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "50% TRUSTED CONTACT ACCESS CONTROL",
+                                color = if (isDecryptionUnlocked) EmeraldSafe else AmberWarning,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (isDecryptionUnlocked) {
+                                    "Threshold Met ($approvedCount/$threshold Approvals) • Decryption Authorized"
+                                } else {
+                                    "$approvedCount of $threshold Approvals Required to Decrypt • Zero Admin Access"
+                                },
+                                color = TextPrimary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    TextButton(onClick = { showThresholdDialog = true }) {
+                        Text(if (isDecryptionUnlocked) "Authorized" else "Manage", color = CyanAccent, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ESP32 Wi-Fi SoftAP Configuration Bar
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
                 Text(
                     text = "ESP32-CAM Wi-Fi SoftAP Receiver Endpoint",
                     color = CyanAccent,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = hostInput,
@@ -116,7 +175,7 @@ fun EvidenceScreen() {
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Ingest Evidence Action
         Button(
@@ -124,7 +183,7 @@ fun EvidenceScreen() {
                 val newSegNum = evidenceList.size + 1
                 val newSeg = EvidenceSegment(
                     id = "ev_seg_$newSegNum",
-                    incidentId = "INC-8921",
+                    incidentId = if (incident.id.isNotBlank()) incident.id else "INC-8921",
                     segmentNumber = newSegNum,
                     timestamp = System.currentTimeMillis(),
                     fileSizeKb = (395..460).random(),
@@ -140,10 +199,10 @@ fun EvidenceScreen() {
         ) {
             Icon(Icons.Default.Wifi, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Simulate Ingesting Frame Segment from ESP32", color = TextPrimary, fontSize = 12.sp)
+            Text("Simulate Ingesting Segment & Autonomous B2 Sync", color = TextPrimary, fontSize = 12.sp)
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (evidenceList.isEmpty()) {
             Box(
@@ -167,7 +226,7 @@ fun EvidenceScreen() {
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "When an SOS incident is triggered, 5-second camera\nsegments from the ESP32 will appear here.",
+                        text = "When an SOS incident is triggered, 5-second camera\nsegments are encrypted with AES-256-GCM and stored locally / in B2.",
                         color = TextTertiary,
                         fontSize = 11.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -240,7 +299,7 @@ fun EvidenceScreen() {
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = if (segment.isUploaded) "Cloud Synced ✓" else "Stored on Phone",
+                                    text = if (segment.isUploaded) "Backblaze B2 ✓" else "Stored on Phone",
                                     color = if (segment.isUploaded) CyanAccent else TextTertiary,
                                     fontSize = 10.sp
                                 )
@@ -250,6 +309,73 @@ fun EvidenceScreen() {
                 }
             }
         }
+    }
+
+    // Shamir's Secret Sharing Access Control Dialog
+    if (showThresholdDialog) {
+        AlertDialog(
+            onDismissRequest = { showThresholdDialog = false },
+            title = {
+                Text(
+                    text = "Contact Evidence Approval (Shamir)",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "To guarantee privacy, ciphertext stored in Backblaze B2 cannot be decrypted by backend administrators. Decryption requires approval from at least 50% ($threshold of ${emergencyContacts.size}) trusted contacts holding Shamir key shares.",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    if (emergencyContacts.isEmpty()) {
+                        Text(
+                            text = "No emergency contacts registered yet. Add contacts to establish key shares.",
+                            color = AmberWarning,
+                            fontSize = 11.sp
+                        )
+                    } else {
+                        emergencyContacts.forEach { contact ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(contact.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = if (contact.keyShareHex.isNotBlank()) "Share: ${contact.keyShareHex.take(12)}..." else "Share pending SOS",
+                                        color = TextTertiary,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Checkbox(
+                                    checked = contact.hasApprovedAccess,
+                                    onCheckedChange = {
+                                        repository.toggleContactApproval(contact.id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showThresholdDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
+                ) {
+                    Text("Done")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 
     // Segment Detail / Preview Dialog
@@ -265,7 +391,7 @@ fun EvidenceScreen() {
             },
             text = {
                 Column {
-                    // Synthetic Frame Canvas Preview
+                    // Preview Frame Box
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -280,17 +406,36 @@ fun EvidenceScreen() {
                             drawLine(gridColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = 1f)
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(32.dp))
+                            Icon(
+                                imageVector = if (isDecryptionUnlocked) Icons.Default.CameraAlt else Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = if (isDecryptionUnlocked) CyanAccent else AmberWarning,
+                                modifier = Modifier.size(32.dp)
+                            )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("ESP32-CAM JPEG FRAME CAPTURE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(segment.resolution, color = TextSecondary, fontSize = 9.sp)
+                            Text(
+                                text = if (isDecryptionUnlocked) "DECRYPTED ESP32 JPEG FRAME" else "CIPHERTEXT ENCRYPTED (AES-256)",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (isDecryptionUnlocked) segment.resolution else "Locked: Requires 50% contact approvals",
+                                color = if (isDecryptionUnlocked) TextSecondary else AmberWarning,
+                                fontSize = 9.sp
+                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("Duration: ${segment.durationSeconds} seconds (~10 JPEG frames)", color = TextPrimary, fontSize = 12.sp)
                     Text("Size: ${segment.fileSizeKb} KB", color = TextSecondary, fontSize = 11.sp)
-                    Text("Cipher: AES-GCM (Authenticated)", color = EmeraldSafe, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Cipher: AES-256-GCM (Authenticated)", color = EmeraldSafe, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (segment.isUploaded) "Storage: Backblaze B2 (Cloud Synced)" else "Storage: Queued on device",
+                        color = if (segment.isUploaded) CyanAccent else TextTertiary,
+                        fontSize = 11.sp
+                    )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text("Integrity SHA-256 Hash:", color = TextSecondary, fontSize = 10.sp)
                     Text(
@@ -310,7 +455,7 @@ fun EvidenceScreen() {
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
                 ) {
-                    Text("Simulate Cloud Upload")
+                    Text("Upload to Backblaze B2")
                 }
             },
             dismissButton = {

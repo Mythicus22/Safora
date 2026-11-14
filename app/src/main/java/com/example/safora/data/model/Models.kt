@@ -1,11 +1,11 @@
 package com.example.safora.data.model
 
 data class User(
-    val name: String = "Jane Doe",
-    val phone: String = "+91 98765 43210",
+    val name: String = "",
+    val phone: String = "",
     val bloodGroup: String = "O+",
-    val medicalNotes: String = "Asthma inhaler in bag",
-    val isOnboarded: Boolean = true
+    val medicalNotes: String = "",
+    val isOnboarded: Boolean = false
 )
 
 enum class DeviceConnectionState {
@@ -52,7 +52,10 @@ data class Incident(
     val triggerSource: String = "MANUAL", // "MANUAL", "VOICE_ML", "WEARABLE_BUTTON"
     val evidenceSegmentsCount: Int = 0,
     val alertsSentCount: Int = 0,
-    val timeline: List<String> = emptyList()
+    val timeline: List<String> = emptyList(),
+    val encryptionKeyHex: String = "",
+    val thresholdRequired: Int = 1,
+    val totalSharesCount: Int = 1
 )
 
 data class EvidenceSegment(
@@ -63,6 +66,7 @@ data class EvidenceSegment(
     val fileSizeKb: Int,
     val isEncrypted: Boolean = true,
     val isUploaded: Boolean = false,
+    val cloudUrl: String? = null,
     val localUri: String? = null,
     val sha256Hash: String = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     val durationSeconds: Int = 5,
@@ -74,7 +78,9 @@ data class Contact(
     val name: String,
     val phone: String,
     val relationship: String,
-    val isEmergencyContact: Boolean = true
+    val isEmergencyContact: Boolean = true,
+    val keyShareHex: String = "", // Shamir's secret share for this contact
+    val hasApprovedAccess: Boolean = false
 )
 
 data class Responder(
