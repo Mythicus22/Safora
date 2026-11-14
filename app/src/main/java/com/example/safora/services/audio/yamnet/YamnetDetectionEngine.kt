@@ -63,6 +63,7 @@ class YamnetDetectionEngine(
 
     private var tfliteInterpreter: Interpreter? = null
     private var isInitialized = false
+    private val interpreterLock = Any()
 
     // Sliding audio sample accumulator (15600 samples)
     private val sampleBuffer = FloatArray(YAMNET_INPUT_SAMPLES)
@@ -84,22 +85,24 @@ class YamnetDetectionEngine(
     }
 
     fun initialize(): Boolean {
-        if (isInitialized && tfliteInterpreter != null) return true
+        synchronized(interpreterLock) {
+            if (isInitialized && tfliteInterpreter != null) return true
 
-        return try {
-            val downloadedFile = java.io.File(context.filesDir, "models/yamnet.tflite")
-            val modelBuffer = loadModelFile(downloadedFile, "models/yamnet.tflite")
-            val options = Interpreter.Options().apply {
-                setNumThreads(2) // Balanced energy efficiency & fast latency
+            return try {
+                val downloadedFile = java.io.File(context.filesDir, "models/yamnet.tflite")
+                val modelBuffer = loadModelFile(downloadedFile, "models/yamnet.tflite")
+                val options = Interpreter.Options().apply {
+                    setNumThreads(2) // Balanced energy efficiency & fast latency
+                }
+                tfliteInterpreter = Interpreter(modelBuffer, options)
+                isInitialized = true
+                Log.i(TAG, "YAMNet TFLite interpreter initialized successfully.")
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load YAMNet TFLite model: ${e.message}", e)
+                isInitialized = false
+                false
             }
-            tfliteInterpreter = Interpreter(modelBuffer, options)
-            isInitialized = true
-            Log.i(TAG, "YAMNet TFLite interpreter initialized successfully.")
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load YAMNet TFLite model: ${e.message}", e)
-            isInitialized = false
-            false
         }
     }
 
@@ -162,10 +165,11 @@ class YamnetDetectionEngine(
         if (isInitialized && interpreter != null) {
             try {
                 // YAMNet expects [15600] float32 input and outputs [1, 521] float32
-                val inputTensor = Array(1) { waveform }
                 val outputTensor = Array(1) { FloatArray(YAMNET_NUM_CLASSES) }
 
-                interpreter.run(inputTensor, outputTensor)
+                synchronized(interpreterLock) {
+                    interpreter.run(waveform, outputTensor)
+                }
                 val scores = outputTensor[0]
 
                 // Extract relevant distress scores
@@ -267,8 +271,12 @@ class YamnetDetectionEngine(
     }
 
     fun close() {
-        tfliteInterpreter?.close()
-        tfliteInterpreter = null
-        isInitialized = false
+        synchronized(interpreterLock) {
+            try {
+                tfliteInterpreter?.close()
+            } catch (_: Exception) {}
+            tfliteInterpreter = null
+            isInitialized = false
+        }
     }
 }

@@ -74,3 +74,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
+
+tasks.withType<Test> {
+    binaryResultsDirectory.set(file("${layout.buildDirectory.asFile.get()}/unit-test-results/binary"))
+}

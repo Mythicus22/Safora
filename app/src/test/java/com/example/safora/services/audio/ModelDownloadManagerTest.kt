@@ -11,17 +11,22 @@ class ModelDownloadManagerTest {
     @Test
     fun testSafetyModelTypesDefinitions() {
         val types = SafetyModelType.values()
-        assertEquals("Must define exactly 3 on-device safety models", 3, types.size)
+        assertEquals("Must define exactly 4 on-device safety models", 4, types.size)
 
         val yamnet = SafetyModelType.YAMNET
         assertEquals("yamnet", yamnet.id)
         assertTrue(yamnet.title.contains("YAMNet"))
         assertEquals("4.1 MB", yamnet.sizeText)
 
-        val vosk = SafetyModelType.VOSK_EN
-        assertEquals("vosk_en", vosk.id)
-        assertTrue(vosk.title.contains("Vosk"))
-        assertEquals("68 MB", vosk.sizeText)
+        val voskEn = SafetyModelType.VOSK_EN
+        assertEquals("vosk_en", voskEn.id)
+        assertTrue(voskEn.title.contains("Vosk English"))
+        assertEquals("68 MB", voskEn.sizeText)
+
+        val voskHi = SafetyModelType.VOSK_HI
+        assertEquals("vosk_hi", voskHi.id)
+        assertTrue(voskHi.title.contains("Vosk Hindi"))
+        assertEquals("79 MB", voskHi.sizeText)
 
         val safetyClassifier = SafetyModelType.SAFETY_CLASSIFIER
         assertEquals("safety_classifier", safetyClassifier.id)

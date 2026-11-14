@@ -9,10 +9,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -21,15 +21,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.safora.core.utils.PermissionHelper
-import com.example.safora.data.model.AudioDetectionResult
 import com.example.safora.data.model.RiskLevel
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.services.audio.AudioMonitoringService
@@ -37,6 +35,16 @@ import com.example.safora.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 
+/**
+ * AI PIPELINE DEBUG & LIVE TELEMETRY CONSOLE.
+ *
+ * Real-time diagnostic console to inspect:
+ * 1. Microphone Audio Feed (VU level dBFS, voice detection).
+ * 2. Model 1 (YAMNet acoustic scream/distress detection).
+ * 3. Model 2 (Vosk live recognized words and rolling transcript).
+ * 4. Model 4 (DistilBERT conversation safety classification).
+ * 5. Multi-Stage Risk Decision Engine decisions and escalation.
+ */
 @Composable
 fun MonitoringScreen(
     onBack: () -> Unit
@@ -44,50 +52,42 @@ fun MonitoringScreen(
     val context = LocalContext.current
     val repository = remember { SaforaRepository.getInstance(context) }
     val isMonitoring by repository.isAudioMonitoring.collectAsState()
-    val lastDetection by repository.lastAudioDetection.collectAsState()
-    val audioHistory by repository.audioHistory.collectAsState()
+    val diagnostics by repository.audioDiagnostics.collectAsState()
     val sensitivity by repository.audioSensitivity.collectAsState()
+    val audioHistory by repository.audioHistory.collectAsState()
+
+    var hasAudioPermission by remember { mutableStateOf(PermissionHelper.hasAudioPermission(context)) }
 
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
+        hasAudioPermission = granted
         if (granted) {
             AudioMonitoringService.start(context)
         }
     }
 
-    // Dynamic pulsating waveform animations
-    val infiniteTransition = rememberInfiniteTransition(label = "audio_bars")
-    val pulseMultiplier by infiniteTransition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(450, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bars"
-    )
-
-    val radarWaveScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.4f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = EaseOutQuad),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "radar_wave"
-    )
+    // Auto-prompt permission if not granted on launch, or auto-start monitoring if granted
+    LaunchedEffect(Unit) {
+        hasAudioPermission = PermissionHelper.hasAudioPermission(context)
+        if (!hasAudioPermission) {
+            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else {
+            AudioMonitoringService.start(context)
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(CharcoalDark)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 18.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(16.dp))
 
-        // App Bar Header
+        // Top App Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -111,14 +111,14 @@ fun MonitoringScreen(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "LIVE ACOUSTIC SHIELD",
+                        text = "AI PIPELINE DEBUG CONSOLE",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "YAMNet • VAD • Vosk English • DistilBERT",
+                        text = "Real-Time Audio, Model & Decision Telemetry",
                         color = TextSecondary,
                         fontSize = 10.sp
                     )
@@ -131,7 +131,7 @@ fun MonitoringScreen(
                     if (isMonitoring) {
                         AudioMonitoringService.stop(context)
                     } else {
-                        if (PermissionHelper.hasAudioPermission(context)) {
+                        if (hasAudioPermission) {
                             AudioMonitoringService.start(context)
                         } else {
                             micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
@@ -146,15 +146,15 @@ fun MonitoringScreen(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = if (isMonitoring) Icons.Default.Mic else Icons.Default.MicOff,
-                        contentDescription = null,
-                        tint = if (isMonitoring) EmeraldSafe else TextTertiary,
-                        modifier = Modifier.size(14.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (isMonitoring) EmeraldSafe else TextTertiary)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isMonitoring) "ACTIVE" else "START",
+                        text = if (isMonitoring) "MIC LIVE" else "MIC PAUSED",
                         color = if (isMonitoring) EmeraldSafe else TextPrimary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
@@ -163,141 +163,342 @@ fun MonitoringScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Centerpiece: Dynamic Acoustic Waveform Radar
-        Box(
-            modifier = Modifier.size(150.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            if (isMonitoring) {
-                // Outer subtle radar pulse wave
-                Box(
-                    modifier = Modifier
-                        .size(120.dp)
-                        .scale(radarWaveScale)
-                        .clip(CircleShape)
-                        .background(EmeraldSafe.copy(alpha = 0.12f))
-                )
-            }
-
-            // Inner circle container
-            Box(
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            listOf(
-                                if (isMonitoring) EmeraldSafe.copy(alpha = 0.2f) else CharcoalSurfaceElevated,
-                                CharcoalSurface
-                            )
-                        )
-                    )
-                    .border(
-                        BorderStroke(
-                            2.dp,
-                            if (isMonitoring) EmeraldSafe.copy(alpha = 0.6f) else CharcoalBorder
-                        ),
-                        CircleShape
-                    ),
-                contentAlignment = Alignment.Center
+        // 1. Microphone Permission Alert Banner (if permission is missing)
+        if (!hasAudioPermission) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CrimsonEmergency.copy(alpha = 0.15f)),
+                border = BorderStroke(1.5.dp, CrimsonEmergency),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                if (isMonitoring) {
-                    // Multi-bar animated waveform visualizer
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Row(
-                        modifier = Modifier.width(68.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val baseHeights = listOf(22.dp, 36.dp, 52.dp, 38.dp, 20.dp)
-                        baseHeights.forEachIndexed { index, baseHeight ->
-                            val scaleFactor = if (index % 2 == 0) pulseMultiplier else (1.3f - pulseMultiplier)
-                            val animatedHeight = baseHeight * scaleFactor.coerceIn(0.35f, 1.25f)
-                            Box(
-                                modifier = Modifier
-                                    .width(6.dp)
-                                    .height(animatedHeight)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(
-                                                EmeraldSafe,
-                                                CyanAccent
-                                            )
-                                        )
-                                    )
+                        Icon(
+                            imageVector = Icons.Default.MicOff,
+                            contentDescription = "Mic Denied",
+                            tint = CrimsonEmergency,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "MICROPHONE ACCESS DENIED",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp,
+                                color = CrimsonEmergency
+                            )
+                            Text(
+                                text = "SAFORA cannot listen or detect screams because microphone permission is missing.",
+                                fontSize = 10.sp,
+                                color = TextPrimary
                             )
                         }
                     }
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.MicOff,
-                        contentDescription = null,
-                        tint = TextTertiary,
-                        modifier = Modifier.size(40.dp)
-                    )
+                    Button(
+                        onClick = { micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) },
+                        colors = ButtonDefaults.buttonColors(containerColor = CrimsonEmergency),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text("ALLOW", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
                 }
             }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = if (isMonitoring) "16,000 Hz MONO CONTINUOUS ANALYSIS" else "ACOUSTIC SHIELD PAUSED",
-            color = if (isMonitoring) EmeraldSafe else TextTertiary,
-            fontWeight = FontWeight.Bold,
-            fontSize = 11.sp,
-            letterSpacing = 0.5.sp
-        )
-        Text(
-            text = "In-memory 10s circular RAM buffer • Zero audio saved during monitoring",
-            color = TextTertiary,
-            fontSize = 10.sp
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Sensitivity Switcher Pill
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(CharcoalSurfaceElevated)
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            listOf("Low", "Medium", "High").forEach { level ->
-                val isSelected = sensitivity == level
-                Surface(
-                    color = if (isSelected) BluePrimary else Color.Transparent,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .clickable { repository.setAudioSensitivity(level) }
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
+        } else {
+            // Live listening active confirmation banner
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                color = EmeraldSafe.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, EmeraldSafe.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(EmeraldSafe)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "$level Sensitivity",
-                        color = if (isSelected) Color.White else TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        text = "🎙️ LIVE AUDIO LISTENING ACTIVE • Notification running on status bar",
+                        color = EmeraldSafe,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Current Stream Risk Classification Card
-        val riskBorderColor = when (lastDetection.riskLevel) {
-            RiskLevel.HIGH -> CrimsonEmergency
-            RiskLevel.MEDIUM -> AmberWarning
-            RiskLevel.LOW -> EmeraldSafe
-        }
+        // =========================================================================
+        // 1. HARDWARE AUDIO RECORD & VAD INPUT INSPECTION
+        // =========================================================================
+        DebugSectionHeader(title = "1. MICROPHONE AUDIO INPUT & VAD GATE")
 
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
-            border = BorderStroke(1.dp, riskBorderColor.copy(alpha = 0.5f)),
-            shape = RoundedCornerShape(14.dp)
+            border = BorderStroke(1.dp, CharcoalBorder),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Audio Status Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(if (isMonitoring) EmeraldSafe else AmberWarning)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isMonitoring) "AudioRecord: 16,000 Hz Mono PCM" else "Microphone Standby",
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // VAD Speech Gate Pill
+                    Surface(
+                        color = if (diagnostics.isVadSpeechActive) EmeraldSafe.copy(alpha = 0.2f) else CharcoalSurfaceElevated,
+                        border = BorderStroke(1.dp, if (diagnostics.isVadSpeechActive) EmeraldSafe else CharcoalBorder),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = if (diagnostics.isVadSpeechActive) "SPEECH DETECTED" else "AMBIENT / CALM",
+                            color = if (diagnostics.isVadSpeechActive) EmeraldSafe else TextTertiary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Real-time VU Meter Bar
+                val normalizedDbfs = ((diagnostics.currentRmsDbfs + 80f) / 80f).coerceIn(0.01f, 1.0f)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LIVE VU:",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.width(55.dp)
+                    )
+                    LinearProgressIndicator(
+                        progress = { normalizedDbfs },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = when {
+                            diagnostics.currentRmsDbfs > -20f -> CrimsonEmergency
+                            diagnostics.currentRmsDbfs > -40f -> AmberWarning
+                            else -> EmeraldSafe
+                        },
+                        trackColor = CharcoalBorder
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${"%.1f".format(diagnostics.currentRmsDbfs)} dBFS",
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.width(65.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Telemetry Sub-metrics
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Noise Floor: ${"%.1f".format(diagnostics.noiseFloorDbfs)} dBFS",
+                        color = TextTertiary,
+                        fontSize = 10.sp
+                    )
+                    Text(
+                        text = "Sensitivity: $sensitivity",
+                        color = TextTertiary,
+                        fontSize = 10.sp
+                    )
+                    Text(
+                        text = "Buffer: 10s Ring RAM",
+                        color = TextTertiary,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // =========================================================================
+        // 2. MODEL 1: YAMNET ACOUSTIC DISTRESS & SCREAM DETECTION
+        // =========================================================================
+        DebugSectionHeader(title = "2. MODEL 1: YAMNET ACOUSTIC CLASSIFIER")
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+            border = BorderStroke(
+                1.dp,
+                if (diagnostics.isScreamFastTrackFired) CrimsonEmergency else CharcoalBorder
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Detected Acoustic Event:",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = diagnostics.yamnetDominantClass.ifBlank { "Analyzing audio window..." },
+                            color = if (diagnostics.yamnetScreamConfidence >= 0.72f) CrimsonEmergency else TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    Surface(
+                        color = CharcoalSurfaceElevated,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "${(diagnostics.yamnetDominantConfidence * 100).toInt()}% Conf",
+                            color = CyanAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Scream Distress Score Indicator
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "SCREAM SCORE:",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.width(90.dp)
+                    )
+                    LinearProgressIndicator(
+                        progress = { diagnostics.yamnetScreamConfidence },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = if (diagnostics.yamnetScreamConfidence >= 0.72f) CrimsonEmergency else AmberWarning,
+                        trackColor = CharcoalBorder
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${(diagnostics.yamnetScreamConfidence * 100).toInt()}%",
+                        color = if (diagnostics.yamnetScreamConfidence >= 0.72f) CrimsonEmergency else TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.width(40.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Fast-Track Escalation Status
+                Surface(
+                    color = if (diagnostics.isScreamFastTrackFired) CrimsonEmergency.copy(alpha = 0.2f) else CharcoalSurfaceElevated,
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (diagnostics.isScreamFastTrackFired) Icons.Default.Warning else Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = if (diagnostics.isScreamFastTrackFired) CrimsonEmergency else CyanAccent,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (diagnostics.isScreamFastTrackFired) {
+                                "FAST-TRACK SCREAM EMERGENCY TRIGGERED (>72%)"
+                            } else {
+                                "Fast-track scream escalation standby (Triggers at >= 72%)"
+                            },
+                            color = if (diagnostics.isScreamFastTrackFired) CrimsonEmergency else TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Total Windows Analyzed: ${diagnostics.totalInferencesCount} • Window: 0.975s • Step: 0.5s",
+                    color = TextTertiary,
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // =========================================================================
+        // 3. MODEL 2 & 3: VOSK DUAL-LANGUAGE SPEECH RECOGNITION (EN / HI)
+        // =========================================================================
+        DebugSectionHeader(title = "3. MODEL 2 & 3: VOSK DUAL SPEECH-TO-TEXT (EN / HI)")
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+            border = BorderStroke(1.dp, CharcoalBorder),
+            shape = RoundedCornerShape(12.dp)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -306,231 +507,308 @@ fun MonitoringScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "REAL-TIME STREAM CLASSIFICATION",
+                        text = "Latest Speech Transcript:",
                         color = TextSecondary,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     Surface(
-                        color = riskBorderColor.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(6.dp)
+                        color = if (diagnostics.detectedLanguage == "HI") AmberWarning.copy(alpha = 0.2f) else EmeraldSafe.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            text = "${lastDetection.riskLevel} RISK",
-                            color = riskBorderColor,
+                            text = if (diagnostics.detectedLanguage == "HI") "KALDI [HI] HINDI" else "KALDI [EN] ENGLISH",
+                            color = if (diagnostics.detectedLanguage == "HI") AmberWarning else EmeraldSafe,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Text(
-                    text = lastDetection.detectedClass,
-                    color = riskBorderColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-
-                if (lastDetection.details.isNotBlank()) {
+                // Words container
+                Surface(
+                    color = CharcoalDark,
+                    border = BorderStroke(1.dp, CharcoalBorder),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
-                        text = lastDetection.details,
-                        color = TextTertiary,
-                        fontSize = 11.sp
+                        text = if (diagnostics.latestTranscriptWord.isNotBlank()) {
+                            "[${diagnostics.detectedLanguage}] \"${diagnostics.latestTranscriptWord}\""
+                        } else {
+                            "(Listening for speech... Speak clearly in English or Hindi to test)"
+                        },
+                        color = if (diagnostics.latestTranscriptWord.isNotBlank()) TextPrimary else TextTertiary,
+                        fontSize = 13.sp,
+                        fontWeight = if (diagnostics.latestTranscriptWord.isNotBlank()) FontWeight.Bold else FontWeight.Normal,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(10.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
+                Text(
+                    text = "Rolling Context Window (45s Horizon):",
+                    color = TextSecondary,
+                    fontSize = 10.sp
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = diagnostics.rollingTranscriptBuffer.ifBlank { "No recent conversation context accumulated." },
+                    color = TextTertiary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // =========================================================================
+        // 4. MODEL 4: CONVERSATION SAFETY / THREAT CLASSIFIER
+        // =========================================================================
+        DebugSectionHeader(title = "4. MODEL 4: CONVERSATION SAFETY CLASSIFIER")
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+            border = BorderStroke(
+                1.dp,
+                if (diagnostics.safetyRiskScore >= diagnostics.safetyThreshold) CrimsonEmergency else CharcoalBorder
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Safety Classification:",
+                            color = TextSecondary,
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = diagnostics.safetyLabel,
+                            color = if (diagnostics.safetyLabel == "HARMFUL") CrimsonEmergency else EmeraldSafe,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+
+                    // Score pill
+                    Surface(
+                        color = if (diagnostics.safetyRiskScore >= diagnostics.safetyThreshold) CrimsonEmergency.copy(alpha = 0.2f) else CharcoalSurfaceElevated,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "Score: ${"%.3f".format(diagnostics.safetyRiskScore)} / ${diagnostics.safetyThreshold}",
+                            color = if (diagnostics.safetyRiskScore >= diagnostics.safetyThreshold) CrimsonEmergency else TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Score Progress Bar
                 LinearProgressIndicator(
-                    progress = { lastDetection.confidence },
+                    progress = { (diagnostics.safetyRiskScore / 0.5f).coerceIn(0f, 1f) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(6.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = riskBorderColor,
+                    color = if (diagnostics.safetyRiskScore >= diagnostics.safetyThreshold) CrimsonEmergency else EmeraldSafe,
                     trackColor = CharcoalBorder
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Decision Threshold: ${diagnostics.safetyThreshold} (from safora_metadata.json) • Tracks threats, kidnapping, stalking and coercion",
+                    color = TextTertiary,
+                    fontSize = 10.sp
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Interactive Testing Triggers
-        Text(
-            text = "TRIGGER TEST SAMPLES (HACKATHON DEMO)",
-            color = TextSecondary,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp,
-            modifier = Modifier.align(Alignment.Start)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
+        // =========================================================================
+        // 5. RISK DECISION ENGINE (OVERALL DECISION & ACTION)
+        // =========================================================================
+        DebugSectionHeader(title = "5. RISK DECISION ENGINE (FINAL OUTPUT)")
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Scream Trigger
-            OutlinedButton(
-                onClick = {
-                    repository.updateAudioDetection(
-                        AudioDetectionResult(
-                            detectedClass = "Scream / Severe Acoustic Distress",
-                            confidence = 0.96f,
-                            timestamp = System.currentTimeMillis(),
-                            riskLevel = RiskLevel.HIGH,
-                            details = "Fast-track scream escalation (>72%)"
-                        )
-                    )
-                    repository.confirmSos("AI_ACOUSTIC_SCREAM")
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, CrimsonEmergency.copy(alpha = 0.6f)),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = CrimsonEmergency.copy(alpha = 0.08f))
-            ) {
-                Text("Scream (96%)", fontSize = 11.sp, color = CrimsonEmergency, fontWeight = FontWeight.Bold)
-            }
-
-            // Threat Trigger
-            OutlinedButton(
-                onClick = {
-                    repository.updateAudioDetection(
-                        AudioDetectionResult(
-                            detectedClass = "Model 4 Harmful Threat Context",
-                            confidence = 0.88f,
-                            timestamp = System.currentTimeMillis(),
-                            riskLevel = RiskLevel.HIGH,
-                            details = "\"Get in the car, don't scream\" (Score: 88% > 5%)"
-                        )
-                    )
-                    repository.confirmSos("AI_CONVERSATION_CLASSIFIER")
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, AmberWarning.copy(alpha = 0.6f)),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = AmberWarning.copy(alpha = 0.08f))
-            ) {
-                Text("Threat (88%)", fontSize = 11.sp, color = AmberWarning, fontWeight = FontWeight.Bold)
-            }
+        val riskColor = when (diagnostics.currentRiskLevel) {
+            RiskLevel.HIGH -> CrimsonEmergency
+            RiskLevel.MEDIUM -> AmberWarning
+            RiskLevel.LOW -> EmeraldSafe
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Row(
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            colors = CardDefaults.cardColors(containerColor = riskColor.copy(alpha = 0.08f)),
+            border = BorderStroke(1.5.dp, riskColor),
+            shape = RoundedCornerShape(12.dp)
         ) {
-            // Calm Speech Trigger
-            OutlinedButton(
-                onClick = {
-                    repository.updateAudioDetection(
-                        AudioDetectionResult(
-                            detectedClass = "Normal Speech / Ambient Calm",
-                            confidence = 0.98f,
-                            timestamp = System.currentTimeMillis(),
-                            riskLevel = RiskLevel.LOW,
-                            details = "Benign baseline conversation"
-                        )
-                    )
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, CharcoalBorder),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = CharcoalSurface)
-            ) {
-                Text("Calm Speech", fontSize = 11.sp, color = EmeraldSafe)
-            }
-
-            // Impact Trigger
-            OutlinedButton(
-                onClick = {
-                    repository.updateAudioDetection(
-                        AudioDetectionResult(
-                            detectedClass = "Physical Collision / Blunt Impact",
-                            confidence = 0.75f,
-                            timestamp = System.currentTimeMillis(),
-                            riskLevel = RiskLevel.MEDIUM,
-                            details = "Sudden high-energy acoustic impulse"
-                        )
-                    )
-                },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, CharcoalBorder),
-                colors = ButtonDefaults.outlinedButtonColors(containerColor = CharcoalSurface)
-            ) {
-                Text("Impact (75%)", fontSize = 11.sp, color = TextPrimary)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Live Audio History Log
-        Text(
-            text = "ACOUSTIC EVENT LOG",
-            color = TextSecondary,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp,
-            modifier = Modifier.align(Alignment.Start)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            items(audioHistory) { event ->
-                val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(event.timestamp))
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 3.dp),
-                    colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
-                    shape = RoundedCornerShape(8.dp)
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column {
+                        Text(
+                            text = "CURRENT SYSTEM RISK TIER:",
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${diagnostics.currentRiskLevel} RISK",
+                            color = riskColor,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 18.sp
+                        )
+                    }
+
+                    Surface(
+                        color = riskColor,
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = event.detectedClass,
-                                color = TextPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (event.details.isNotBlank()) {
-                                Text(event.details, color = TextTertiary, fontSize = 10.sp)
+                        Text(
+                            text = when (diagnostics.currentRiskLevel) {
+                                RiskLevel.HIGH -> "EMERGENCY ACTIVE"
+                                RiskLevel.MEDIUM -> "CHECK-IN REQUIRED"
+                                RiskLevel.LOW -> "MONITORING"
+                            },
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Decision Reason:",
+                    color = TextSecondary,
+                    fontSize = 10.sp
+                )
+                Text(
+                    text = diagnostics.riskDecisionReason,
+                    color = TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // =========================================================================
+        // 6. REAL-TIME ACOUSTIC EVENT LOG STREAM
+        // =========================================================================
+        DebugSectionHeader(title = "6. REAL-TIME EVENT STREAM LOG")
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+            border = BorderStroke(1.dp, CharcoalBorder),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                if (audioHistory.isEmpty()) {
+                    Text(
+                        text = "No detection events logged yet. Speak or make sounds into the microphone.",
+                        color = TextTertiary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else {
+                    audioHistory.take(8).forEach { event ->
+                        val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()).format(Date(event.timestamp))
+                        val evColor = when (event.riskLevel) {
+                            RiskLevel.HIGH -> CrimsonEmergency
+                            RiskLevel.MEDIUM -> AmberWarning
+                            RiskLevel.LOW -> EmeraldSafe
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = event.detectedClass,
+                                    color = TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (event.details.isNotBlank()) {
+                                    Text(event.details, color = TextTertiary, fontSize = 9.sp)
+                                }
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "${event.riskLevel} (${(event.confidence * 100).toInt()}%)",
+                                    color = evColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = time,
+                                    color = TextTertiary,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
                             }
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "${(event.confidence * 100).toInt()}%",
-                                color = when (event.riskLevel) {
-                                    RiskLevel.HIGH -> CrimsonEmergency
-                                    RiskLevel.MEDIUM -> AmberWarning
-                                    RiskLevel.LOW -> EmeraldSafe
-                                },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            Text(timeStr, color = TextTertiary, fontSize = 9.sp)
-                        }
+                        HorizontalDivider(color = CharcoalBorder.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 2.dp))
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(28.dp))
+    }
+}
+
+@Composable
+fun DebugSectionHeader(title: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(12.dp)
+                .background(CyanAccent)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = title,
+            color = CyanAccent,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 1.sp
+        )
     }
 }

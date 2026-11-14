@@ -96,15 +96,46 @@ class RealAudioPipelineEngine(
         vad.addListener(voskEngine)
         vad.addListener(object : VadListener {
             override fun onSpeechStateChanged(isSpeechActive: Boolean, rmsDbfs: Float) {
-                // Real-time debug telemetry
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        isAudioCaptureActive = isRunning,
+                        isVadSpeechActive = isSpeechActive,
+                        currentRmsDbfs = rmsDbfs,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
             }
+
             override fun onSpeechAudioFrame(pcmData: ShortArray, readSize: Int) {}
+
+            override fun onAudioEnergyTelemetry(rmsDbfs: Float, noiseFloorDbfs: Float, isSpeech: Boolean) {
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        isAudioCaptureActive = isRunning,
+                        isVadSpeechActive = isSpeech,
+                        currentRmsDbfs = rmsDbfs,
+                        noiseFloorDbfs = noiseFloorDbfs,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
+            }
         })
 
         // 5. Connect YAMNet detections to Risk Decision Engine
         yamnetEngine.addListener(object : YamnetDetectionListener {
             override fun onYamnetInference(result: YamnetInferenceResult) {
                 decisionEngine.onAcousticUpdate(result)
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        yamnetDominantClass = result.dominantClass,
+                        yamnetDominantConfidence = result.dominantConfidence,
+                        yamnetScreamConfidence = result.screamConfidence,
+                        isScreamFastTrackFired = result.screamConfidence >= 0.72f,
+                        totalInferencesCount = diag.totalInferencesCount + 1,
+                        lastInferenceLatencyMs = result.inferenceTimeMs,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
             }
 
             override fun onFastDistressEscalation(result: YamnetInferenceResult) {
@@ -115,7 +146,15 @@ class RealAudioPipelineEngine(
         // 6. Connect Vosk Speech Transcripts to Model 4 Safety Classifier
         voskEngine.addListener(object : VoskTranscriptListener {
             override fun onNewTranscriptSentence(result: SpeechTranscriptResult) {
-                repository.logEmergencyTimeline("Speech Transcript: \"${result.text}\"")
+                repository.logEmergencyTimeline("Speech Transcript [${result.language}]: \"${result.text}\"")
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        latestTranscriptWord = result.text,
+                        detectedLanguage = result.language,
+                        rollingTranscriptBuffer = voskEngine.getRollingContext(),
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
                 scope.launch {
                     val classification = textClassifier.classifyTextContext(result.text)
                     decisionEngine.onConversationUpdate(classification)
@@ -123,6 +162,12 @@ class RealAudioPipelineEngine(
             }
 
             override fun onRollingContextUpdated(fullContext: String) {
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        rollingTranscriptBuffer = fullContext,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
                 scope.launch {
                     val classification = textClassifier.classifyTextContext(fullContext)
                     decisionEngine.onConversationUpdate(classification)
@@ -136,12 +181,27 @@ class RealAudioPipelineEngine(
                 if (result.isHarmful) {
                     repository.logEmergencyTimeline("Model 4 WARNING: Harmful conversation context detected (Score: ${(result.score * 100).toInt()}%)")
                 }
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        safetyLabel = result.label,
+                        safetyRiskScore = result.score,
+                        safetyThreshold = result.threshold,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
             }
         })
 
         // 8. Connect Risk Decision Engine to UI & Emergency Dispatch Workflow
         decisionEngine.addListener(object : RiskDecisionListener {
             override fun onRiskEvaluated(decision: RiskDecisionResult) {
+                repository.updateAudioDiagnostics { diag ->
+                    diag.copy(
+                        currentRiskLevel = decision.riskLevel,
+                        riskDecisionReason = decision.reason,
+                        lastUpdatedTimestamp = System.currentTimeMillis()
+                    )
+                }
                 val detectionResult = AudioDetectionResult(
                     detectedClass = decision.reason,
                     confidence = decision.compositeScore,

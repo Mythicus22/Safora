@@ -46,21 +46,40 @@ class SafetyTextClassifier(
         const val BASELINE_THRESHOLD = 0.05f
         const val MAX_INPUT_LENGTH = 128
 
-        // FullSafety Abusive / Threat / Harmful Semantic Lexicon
+        // FullSafety Abusive / Threat / Harmful Semantic Lexicon (English, Hindi Devanagari, and Hinglish)
         private val HARMFUL_HIGH_INTENT = listOf(
+            // English
             "kill you", "hurt you", "stab", "shoot", "attack",
-            "bleed", "break your", "murder", "beat you", "die"
+            "bleed", "break your", "murder", "beat you", "die",
+            // Hindi (Devanagari)
+            "मार दूंगा", "जान से मार", "चाकू", "गोली", "खत्म कर दूंगा", "चोट", "मार डालूंगा", "मारूंगा",
+            // Hindi / Hinglish Transliterations
+            "mar dunga", "maar dunga", "jaan se maar", "chaku", "goli", "khatam kar dunga", "mar dalunga", "maar dalunga", "marunga"
         )
 
         private val HARMFUL_COERCION_STALKING = listOf(
+            // English
             "get in the car", "don't scream", "shut up", "follow you",
             "corner you", "let me in", "touch you", "grab her", "take off your",
-            "don't make a sound", "don't move", "give me your", "give me the", "hand over"
+            "don't make a sound", "don't move", "give me your", "give me the", "hand over",
+            // Hindi (Devanagari)
+            "गाड़ी में बैठ", "गाड़ी में बैठ", "चुप रह", "आवाज़ मत निकाल", "आवाज मत निकाल", "चलो मेरे साथ",
+            "हाथ मत लगा", "पकड़", "कपड़े उतार", "चुपचाप चल", "फोन दे", "पैसा निकाल",
+            // Hindi / Hinglish Transliterations
+            "gadi mein baith", "gaadi me baith", "chup raho", "chup kar", "awaz mat nikal", "awaz mat karna",
+            "chalo mere sath", "haath mat laga", "pakad", "chupchap chal", "phone de"
         )
 
         private val DISTRESS_EMERGENCY_PLEAS = listOf(
+            // English
             "leave me alone", "please stop", "let me go", "help me",
-            "call the police", "don't do this", "get away from me", "back off"
+            "call the police", "don't do this", "get away from me", "back off",
+            // Hindi (Devanagari)
+            "बचाओ", "मदद करो", "छोड़ दो मुझे", "छोड़ दो मुझे", "पुलिस को बुलाओ",
+            "जाने दो", "मत करो ऐसा", "दूर रहो", "छोड़ो", "छोड़ो", "कोई बचाओ",
+            // Hindi / Hinglish Transliterations
+            "bachao", "madad karo", "chhod do mujhe", "chhoro mujhe", "police ko bulao",
+            "jane do", "mat karo aisa", "door raho", "bachao mujhe", "koi bachao"
         )
 
         private val BENIGN_FALSE_POSITIVE_GUARDS = listOf(

@@ -130,6 +130,7 @@ data class YamnetInferenceResult(
 data class SpeechTranscriptResult(
     val text: String,
     val isFinal: Boolean,
+    val language: String = "EN", // "EN" or "HI"
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -155,12 +156,22 @@ data class RiskDecisionResult(
 
 data class AudioPipelineDiagnostics(
     val isAudioCaptureActive: Boolean = false,
-    val isVadActive: Boolean = false,
+    val isVadSpeechActive: Boolean = false,
     val currentRmsDbfs: Float = -90.0f,
-    val yamnetDistressScore: Float = 0.0f,
-    val speechTranscriptContext: String = "",
-    val textSafetyScore: Float = 0.0f,
+    val noiseFloorDbfs: Float = -60.0f,
+    val yamnetDominantClass: String = "Standby",
+    val yamnetDominantConfidence: Float = 0.0f,
+    val yamnetScreamConfidence: Float = 0.0f,
+    val isScreamFastTrackFired: Boolean = false,
+    val latestTranscriptWord: String = "",
+    val detectedLanguage: String = "EN", // "EN" or "HI"
+    val rollingTranscriptBuffer: String = "",
+    val safetyLabel: String = "BENIGN",
+    val safetyRiskScore: Float = 0.0f,
+    val safetyThreshold: Float = 0.05f,
     val currentRiskLevel: RiskLevel = RiskLevel.LOW,
-    val totalInferences: Long = 0L,
-    val lastInferenceLatencyMs: Long = 0L
+    val riskDecisionReason: String = "Waiting for microphone audio...",
+    val totalInferencesCount: Long = 0L,
+    val lastInferenceLatencyMs: Long = 0L,
+    val lastUpdatedTimestamp: Long = System.currentTimeMillis()
 )

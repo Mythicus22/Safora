@@ -59,6 +59,17 @@ class SaforaRepository(private val context: Context) {
     private val _audioHistory = MutableStateFlow<List<AudioDetectionResult>>(emptyList())
     val audioHistory: StateFlow<List<AudioDetectionResult>> = _audioHistory.asStateFlow()
 
+    private val _audioDiagnostics = MutableStateFlow(AudioPipelineDiagnostics())
+    val audioDiagnostics: StateFlow<AudioPipelineDiagnostics> = _audioDiagnostics.asStateFlow()
+
+    fun updateAudioDiagnostics(diagnostics: AudioPipelineDiagnostics) {
+        _audioDiagnostics.value = diagnostics
+    }
+
+    fun updateAudioDiagnostics(transform: (AudioPipelineDiagnostics) -> AudioPipelineDiagnostics) {
+        _audioDiagnostics.value = transform(_audioDiagnostics.value)
+    }
+
     // Location state
     private val _currentLocation = MutableStateFlow(Pair(28.6139, 77.2090))
     val currentLocation: StateFlow<Pair<Double, Double>> = _currentLocation.asStateFlow()

@@ -46,6 +46,14 @@ enum class SafetyModelType(
         sizeText = "68 MB",
         approxSizeBytes = 71_303_168L
     ),
+    VOSK_HI(
+        id = "vosk_hi",
+        title = "Model 3: Vosk Hindi Speech Recognition",
+        subtitle = "Offline Kaldi VAD-Gated Hindi STT",
+        description = "Complete on-device Hindi acoustic & language model (vosk-model-small-hi-0.22). Activated by Voice Activity Detection to transcribe Hindi and Hinglish speech.",
+        sizeText = "79 MB",
+        approxSizeBytes = 82_840_000L
+    ),
     SAFETY_CLASSIFIER(
         id = "safety_classifier",
         title = "Model 4: DistilBERT Threat Classifier",
@@ -129,6 +137,7 @@ class ModelDownloadManager private constructor(private val appContext: Context) 
         return when (type) {
             SafetyModelType.YAMNET -> File(modelsDir, "yamnet.tflite")
             SafetyModelType.VOSK_EN -> File(modelsDir, "vosk-model-small-en-us-0.15")
+            SafetyModelType.VOSK_HI -> File(modelsDir, "vosk-model-small-hi-0.22")
             SafetyModelType.SAFETY_CLASSIFIER -> File(modelsDir, "safora_metadata.json")
         }
     }
@@ -138,7 +147,7 @@ class ModelDownloadManager private constructor(private val appContext: Context) 
             SafetyModelType.YAMNET -> {
                 fileOrDir.exists() && fileOrDir.length() >= 4_000_000L
             }
-            SafetyModelType.VOSK_EN -> {
+            SafetyModelType.VOSK_EN, SafetyModelType.VOSK_HI -> {
                 if (!fileOrDir.exists() || !fileOrDir.isDirectory) return false
                 val am = File(fileOrDir, "am")
                 val graph = File(fileOrDir, "graph")
@@ -169,7 +178,12 @@ class ModelDownloadManager private constructor(private val appContext: Context) 
                         }
                     }
                     SafetyModelType.VOSK_EN -> {
-                        downloadVoskEnglishModel { progress ->
+                        downloadVoskModel("models/vosk-model-small-en-us-0.15", getTargetFileOrDir(SafetyModelType.VOSK_EN)) { progress ->
+                            updateItemState(type, ModelDownloadStatus.DOWNLOADING, progress)
+                        }
+                    }
+                    SafetyModelType.VOSK_HI -> {
+                        downloadVoskModel("models/vosk-model-small-hi-0.22", getTargetFileOrDir(SafetyModelType.VOSK_HI)) { progress ->
                             updateItemState(type, ModelDownloadStatus.DOWNLOADING, progress)
                         }
                     }
@@ -259,12 +273,10 @@ class ModelDownloadManager private constructor(private val appContext: Context) 
         onProgress(1.0f)
     }
 
-    private suspend fun downloadVoskEnglishModel(onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
-        val destDir = getTargetFileOrDir(SafetyModelType.VOSK_EN)
+    private suspend fun downloadVoskModel(rootPath: String, destDir: File, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
         if (!destDir.exists()) destDir.mkdirs()
 
         val assetManager = appContext.assets
-        val rootPath = "models/vosk-model-small-en-us-0.15"
 
         // Collect all files to accurately compute progress
         val allFiles = mutableListOf<String>()

@@ -48,6 +48,26 @@ class SafetyTextClassifierTest {
     }
 
     @Test
+    fun testHindiDevanagariThreatsClassifiedHarmful() = runBlocking {
+        val transcript = "बचाओ मुझे छोड़ दो मुझे"
+        val result = classifier.classifyTextContext(transcript)
+
+        assertEquals("HARMFUL", result.label)
+        assertTrue("Hindi emergency plea must be marked harmful", result.isHarmful)
+        assertTrue("Score must exceed 0.05 baseline threshold", result.score >= 0.05f)
+    }
+
+    @Test
+    fun testHinglishThreatsClassifiedHarmful() = runBlocking {
+        val transcript = "gadi mein baith mar dunga tujhe awaz mat nikal"
+        val result = classifier.classifyTextContext(transcript)
+
+        assertEquals("HARMFUL", result.label)
+        assertTrue("Hinglish threat must be marked harmful", result.isHarmful)
+        assertTrue(result.score >= 0.05f)
+    }
+
+    @Test
     fun testBenignFalsePositiveGuard() = runBlocking {
         // "help with homework" or "give me money for groceries" should not trigger emergency
         val transcript1 = "can someone please help me with my math homework"

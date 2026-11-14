@@ -66,7 +66,7 @@ class AudioMonitoringService : Service() {
         }
 
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 startForeground(
                     NOTIFICATION_ID,
@@ -76,31 +76,34 @@ class AudioMonitoringService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed startForeground with MICROPHONE type: ${e.message}. Retrying default.")
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (fatal: Exception) {
+                Log.e(TAG, "Cannot start foreground service: ${fatal.message}")
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
-        startPipeline()
+        try {
+            startPipeline()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting audio pipeline: ${e.message}", e)
+        }
         return START_STICKY
     }
 
     private fun startPipeline() {
         if (activeEngine != null) return
 
-        val isDemo = repository.isDemoMode.value
-        Log.i(TAG, "Starting Audio Detection Pipeline (Mode: ${if (isDemo) "Simulation" else "Production AI"})")
+        Log.i(TAG, "Starting Audio Detection Pipeline with RealAudioPipelineEngine (Microphone, YAMNet, VAD, Vosk, Model 4)")
 
-        activeEngine = if (isDemo) {
-            AudioSimulationEngine().apply {
-                startAnalysis { result ->
-                    repository.updateAudioDetection(result)
-                }
-            }
-        } else {
-            RealAudioPipelineEngine(this).apply {
-                startAnalysis { result ->
-                    repository.updateAudioDetection(result)
-                }
+        // Always run the real production audio capture pipeline so microphone is live and listening
+        activeEngine = RealAudioPipelineEngine(this).apply {
+            startAnalysis { result ->
+                repository.updateAudioDetection(result)
             }
         }
 
@@ -126,10 +129,12 @@ class AudioMonitoringService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "SAFORA Safety Shield",
-                NotificationManager.IMPORTANCE_LOW
+                "SAFORA Safety Shield (Live Listening)",
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Monitors local audio patterns for distress calls"
+                description = "Notifies when SAFORA is actively listening for distress screams & emergency speech."
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -137,12 +142,29 @@ class AudioMonitoringService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val openIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = if (openIntent != null) {
+            android.app.PendingIntent.getActivity(
+                this,
+                0,
+                openIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+        } else null
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SAFORA Safety Shield Active")
-            .setContentText("Local acoustic & speech safety monitoring active.")
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentTitle("🎙️ SAFORA Is Listening for Audio")
+            .setContentText("Acoustic scream & speech safety shield is actively running.")
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .apply {
+                if (pendingIntent != null) setContentIntent(pendingIntent)
+            }
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 }

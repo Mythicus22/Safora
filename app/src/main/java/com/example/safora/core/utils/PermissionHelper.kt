@@ -56,4 +56,10 @@ object PermissionHelper {
         }
         return list
     }
+
+    fun getMissingPermissions(context: Context): List<String> {
+        return getRequiredRuntimePermissions().filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+    }
 }

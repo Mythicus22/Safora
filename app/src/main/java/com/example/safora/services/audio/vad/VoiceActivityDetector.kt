@@ -8,6 +8,7 @@ import kotlin.math.sqrt
 interface VadListener {
     fun onSpeechStateChanged(isSpeechActive: Boolean, rmsDbfs: Float)
     fun onSpeechAudioFrame(pcmData: ShortArray, readSize: Int)
+    fun onAudioEnergyTelemetry(rmsDbfs: Float, noiseFloorDbfs: Float, isSpeech: Boolean) {}
 }
 
 /**
@@ -92,6 +93,15 @@ class VoiceActivityDetector(
             } else if (!isSpeechActive) {
                 // Slowly adapt noise floor during calm background
                 noiseFloorDbfs = (noiseFloorDbfs * 0.95f + currentDbfs * 0.05f).coerceIn(-75.0f, -30.0f)
+            }
+        }
+
+        // Dispatch continuous energy telemetry for real-time live debugging VU meters
+        synchronized(listeners) {
+            for (listener in listeners) {
+                try {
+                    listener.onAudioEnergyTelemetry(currentDbfs, noiseFloorDbfs, isSpeechActive)
+                } catch (_: Exception) {}
             }
         }
 

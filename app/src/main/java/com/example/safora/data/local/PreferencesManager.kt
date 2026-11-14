@@ -64,7 +64,7 @@ class PreferencesManager(private val context: Context) {
     }
 
     val demoModeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[KEY_DEMO_MODE] ?: true
+        prefs[KEY_DEMO_MODE] ?: false
     }
 
     val wifiHostFlow: Flow<String> = context.dataStore.data.map { prefs ->

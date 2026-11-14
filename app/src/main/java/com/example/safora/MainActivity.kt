@@ -15,9 +15,24 @@ class MainActivity : ComponentActivity() {
 
     private val modelDownloadManager by lazy { ModelDownloadManager.getInstance(this) }
 
+    private val runtimePermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        if (results[android.Manifest.permission.RECORD_AUDIO] == true) {
+            AudioMonitoringService.start(this)
+        }
+        modelDownloadManager.checkModelStatusAndNotify(this)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Auto-request missing runtime permissions on startup (Microphone, Notifications, GPS)
+        val missing = PermissionHelper.getMissingPermissions(this)
+        if (missing.isNotEmpty()) {
+            runtimePermissionLauncher.launch(missing.toTypedArray())
+        }
 
         // Check if models are downloaded whenever app is opened; notify user if missing
         modelDownloadManager.checkModelStatusAndNotify(this)

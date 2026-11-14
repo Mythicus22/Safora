@@ -89,19 +89,32 @@ class SharedAudioCaptureEngine private constructor(private val context: Context)
         val bufferSize = (minBufferSize * 2).coerceAtLeast(SAMPLE_RATE / 4) // At least 250ms chunks
 
         try {
+            // 1. Try standard MIC source first (universal across all Android devices)
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
                 bufferSize
             )
 
+            // 2. Fallback to VOICE_RECOGNITION if MIC failed
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                // Fallback to standard MIC source if VOICE_RECOGNITION is restricted
                 audioRecord?.release()
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    SAMPLE_RATE,
+                    CHANNEL_CONFIG,
+                    AUDIO_FORMAT,
+                    bufferSize
+                )
+            }
+
+            // 3. Fallback to DEFAULT
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                audioRecord?.release()
+                audioRecord = AudioRecord(
+                    MediaRecorder.AudioSource.DEFAULT,
                     SAMPLE_RATE,
                     CHANNEL_CONFIG,
                     AUDIO_FORMAT,
