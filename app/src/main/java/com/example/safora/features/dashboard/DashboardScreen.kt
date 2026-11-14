@@ -1,8 +1,10 @@
 package com.example.safora.features.dashboard
 
-import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,7 +20,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,9 +33,8 @@ import com.example.safora.data.model.DeviceConnectionState
 import com.example.safora.data.model.IncidentState
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.services.audio.AudioMonitoringService
+import com.example.safora.services.audio.model.ModelDownloadManager
 import com.example.safora.services.location.SaforaLocationClient
-import com.example.safora.ui.components.LargeSosButton
-import com.example.safora.ui.components.StatusCard
 import com.example.safora.ui.theme.*
 
 @Composable
@@ -44,7 +48,7 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     val repository = remember { SaforaRepository.getInstance(context) }
-    val modelManager = remember { com.example.safora.services.audio.model.ModelDownloadManager.getInstance(context) }
+    val modelManager = remember { ModelDownloadManager.getInstance(context) }
 
     val user by repository.user.collectAsState()
     val wearable by repository.wearable.collectAsState()
@@ -55,17 +59,6 @@ fun DashboardScreen(
     val contacts by repository.contacts.collectAsState()
     val isDemoMode by repository.isDemoMode.collectAsState()
     val areAllModelsDownloaded by modelManager.areAllModelsDownloaded.collectAsState()
-
-    var showMicPermissionDialog by remember { mutableStateOf(false) }
-
-    // Launcher for on-demand audio recording permission
-    val audioPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            AudioMonitoringService.start(context)
-        }
-    }
 
     // Auto-query live GPS on dashboard launch and auto-start mic monitoring if models are ready
     LaunchedEffect(Unit) {
@@ -88,6 +81,27 @@ fun DashboardScreen(
             onNavigateToEmergency()
         }
     }
+
+    // Concentric pulse animation for SOS button
+    val infiniteTransition = rememberInfiniteTransition(label = "sos_pulse")
+    val pulseScale1 by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = EaseOutQuad),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse_scale_1"
+    )
+    val pulseAlpha1 by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1800, easing = EaseOutQuad),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pulse_alpha_1"
+    )
 
     Column(
         modifier = Modifier
@@ -112,104 +126,57 @@ fun DashboardScreen(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
-                        letterSpacing = 1.sp
+                        letterSpacing = 2.sp
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    if (isDemoMode) {
-                        Surface(
-                            color = AmberWarning.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(4.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        color = EmeraldSafe.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(EmeraldSafe)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "DEMO MODE",
-                                color = AmberWarning,
+                                text = "SHIELD LIVE",
+                                color = EmeraldSafe,
                                 fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
                 Text(
-                    text = if (user.name.isNotBlank()) "Protected: ${user.name}" else "System Active",
+                    text = if (user.name.isNotBlank()) "Protected: ${user.name}" else "Guardian System Armed",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
             }
 
-            // Emergency Contacts pill button
-            Surface(
-                color = CharcoalSurfaceElevated,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.clickable { onNavigateToContacts() }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.People,
-                        contentDescription = "Contacts",
-                        tint = CrimsonEmergency,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${contacts.count { it.isEmergencyContact }} Contacts",
-                        color = TextPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        if (!areAllModelsDownloaded) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Card(
+            // Quick Profile / Settings Icon
+            IconButton(
+                onClick = onNavigateToProfile,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onNavigateToProfile() },
-                colors = CardDefaults.cardColors(containerColor = AmberWarning.copy(alpha = 0.15f)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AmberWarning.copy(alpha = 0.6f)),
-                shape = RoundedCornerShape(12.dp)
+                    .clip(CircleShape)
+                    .background(CharcoalSurfaceElevated)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Warning",
-                        tint = AmberWarning,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Safety AI Models Missing",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = AmberWarning
-                        )
-                        Text(
-                            text = "Offline scream & threat shield disabled. Tap to download in Profile.",
-                            fontSize = 11.sp,
-                            color = TextSecondary
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Go",
-                        tint = AmberWarning
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = "Settings",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
 
-        // Active Emergency Banner (if returning from resolved/cancelled or if active)
+        // Active Emergency Banner (if ongoing)
         if (incident.state == IncidentState.CONFIRMED_SOS || incident.state == IncidentState.VERIFYING) {
             Spacer(modifier = Modifier.height(14.dp))
             Surface(
@@ -256,204 +223,319 @@ fun DashboardScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Large SOS Button Section
-        LargeSosButton(
-            isPulsing = true,
-            onClick = {
-                repository.confirmSos("MANUAL_APP_BUTTON")
-                onNavigateToEmergency()
+        // Missing Models Alert Banner
+        if (!areAllModelsDownloaded) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToProfile() },
+                colors = CardDefaults.cardColors(containerColor = AmberWarning.copy(alpha = 0.12f)),
+                border = BorderStroke(1.dp, AmberWarning.copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Warning",
+                        tint = AmberWarning,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Safety AI Models Required",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = AmberWarning
+                        )
+                        Text(
+                            text = "Download on-device models to enable offline scream & threat shield.",
+                            fontSize = 10.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    Text(
+                        text = "DOWNLOAD",
+                        color = CyanAccent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
-        )
+        }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // =========================================================================
+        // COCKPIT TELEMETRY SYMBOLS (Replaces bulky cards with interactive HUD glyphs)
+        // =========================================================================
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Symbol 1: Wearable Necklace (ESP32-CAM)
+            TelemetrySymbolCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.Watch,
+                label = "WEARABLE",
+                value = when (wearable.state) {
+                    DeviceConnectionState.CONNECTED -> "${wearable.batteryLevel}%"
+                    DeviceConnectionState.CONNECTING -> "LINKING"
+                    DeviceConnectionState.SCANNING -> "SCAN"
+                    DeviceConnectionState.DISCONNECTED -> "OFFLINE"
+                },
+                accentColor = when (wearable.state) {
+                    DeviceConnectionState.CONNECTED -> EmeraldSafe
+                    DeviceConnectionState.CONNECTING -> CyanAccent
+                    DeviceConnectionState.SCANNING -> AmberWarning
+                    DeviceConnectionState.DISCONNECTED -> TextTertiary
+                },
+                onClick = onNavigateToPairing
+            )
+
+            // Symbol 2: Acoustic Shield (Direct Jump to Live Monitoring!)
+            TelemetrySymbolCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.GraphicEq,
+                label = "LIVE SHIELD",
+                value = if (isMonitoring) "ACTIVE" else "STANDBY",
+                accentColor = if (isMonitoring) EmeraldSafe else AmberWarning,
+                onClick = onNavigateToMonitoring
+            )
+
+            // Symbol 3: GPS Satellite Fix
+            TelemetrySymbolCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.GpsFixed,
+                label = "LOCATION",
+                value = if (isRealGps) "LOCKED" else "ACQUIRING",
+                accentColor = if (isRealGps) BluePrimary else AmberWarning,
+                onClick = onNavigateToMap
+            )
+
+            // Symbol 4: Emergency Contacts
+            TelemetrySymbolCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.Group,
+                label = "CONTACTS",
+                value = "${contacts.count { it.isEmergencyContact }} READY",
+                accentColor = if (contacts.any { it.isEmergencyContact }) EmeraldSafe else CrimsonEmergency,
+                onClick = onNavigateToContacts
+            )
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
+
+        // =========================================================================
+        // CENTERPIECE: TACTICAL PULSING SOS EMERGENCY BUTTON
+        // =========================================================================
+        Box(
+            modifier = Modifier
+                .size(240.dp)
+                .padding(10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Outer radar pulse wave 1
+            Box(
+                modifier = Modifier
+                    .size(200.dp)
+                    .scale(pulseScale1)
+                    .clip(CircleShape)
+                    .background(CrimsonEmergency.copy(alpha = pulseAlpha1))
+            )
+
+            // Mid beacon ring
+            Box(
+                modifier = Modifier
+                    .size(190.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                CrimsonEmergency.copy(alpha = 0.35f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            // Core SOS Push Disc
+            Surface(
+                modifier = Modifier
+                    .size(150.dp)
+                    .clip(CircleShape)
+                    .clickable {
+                        repository.confirmSos("MANUAL_APP_BUTTON")
+                        onNavigateToEmergency()
+                    },
+                shape = CircleShape,
+                color = CrimsonEmergency,
+                shadowElevation = 14.dp,
+                border = BorderStroke(3.dp, Color.White.copy(alpha = 0.35f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFFFF5252),
+                                    Color(0xFFD32F2F),
+                                    Color(0xFF8E0000)
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "SOS",
+                            tint = Color.White,
+                            modifier = Modifier.size(38.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "SOS",
+                            color = Color.White,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp
+                        )
+                        Text(
+                            text = "ONE-TOUCH",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "ONE-TOUCH INSTANT SOS DISPATCH",
+            text = "INSTANT EMERGENCY ESCALATION",
             color = CrimsonEmergency,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp
+            letterSpacing = 1.sp
         )
         Text(
-            text = "Dispatches SMS to trusted contacts, starts camera & dials 112",
+            text = "Dispatches SMS with GPS to contacts • Starts necklace camera • Dials 112",
             color = TextTertiary,
             fontSize = 10.sp
         )
 
-        Spacer(modifier = Modifier.height(22.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Wearable Necklace Card
-        StatusCard(
-            title = "WEARABLE NECKLACE (ESP32-CAM)",
-            statusText = when (wearable.state) {
-                DeviceConnectionState.CONNECTED -> "${wearable.name} (${wearable.batteryLevel}% Battery - BLE Connected)"
-                DeviceConnectionState.CONNECTING -> "Connecting to ESP32 BLE GATT..."
-                DeviceConnectionState.SCANNING -> "Scanning for SAFORA BLE..."
-                DeviceConnectionState.DISCONNECTED -> "Wearable Standby / Disconnected"
-            },
-            isActive = wearable.state == DeviceConnectionState.CONNECTED,
-            actionText = if (wearable.state == DeviceConnectionState.CONNECTED) "MANAGE" else "CONNECT",
-            onActionClick = onNavigateToPairing
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Audio Monitoring Status Card
-        StatusCard(
-            title = "LOCAL ACOUSTIC SAFETY SHIELD",
-            statusText = if (isMonitoring) "Actively Analyzing Local Audio for Distress" else "Acoustic Shield Paused",
-            isActive = isMonitoring,
-            actionText = if (isMonitoring) "VIEW SHIELD" else "START",
-            onActionClick = {
-                if (isMonitoring) {
-                    onNavigateToMonitoring()
-                } else {
-                    if (PermissionHelper.hasAudioPermission(context)) {
-                        AudioMonitoringService.start(context)
-                    } else {
-                        showMicPermissionDialog = true
-                    }
-                }
-            }
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Location & Responder Status Card
-        StatusCard(
-            title = if (isRealGps) "LIVE PHONE GPS LOCATION" else "GPS LOCATION (ESTIMATED)",
-            statusText = "${"%.4f".format(location.first)}, ${"%.4f".format(location.second)} • 3 Responders Nearby",
-            isActive = isRealGps,
-            actionText = "VIEW MAP",
-            onActionClick = onNavigateToMap
-        )
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Safety Contacts Summary
-        Card(
+        // =========================================================================
+        // QUICK ACCESS TACTICAL SHORTCUTS
+        // =========================================================================
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
-            shape = RoundedCornerShape(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "TRUSTED EMERGENCY NETWORK",
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    TextButton(onClick = onNavigateToContacts) {
-                        Text("Manage", color = BluePrimary, fontSize = 11.sp)
-                    }
-                }
-                if (contacts.isEmpty()) {
-                    Text(
-                        text = "No emergency contacts added yet. Tap Manage to import from your phonebook.",
-                        color = AmberWarning,
-                        fontSize = 11.sp
-                    )
-                } else {
-                    Text(
-                        text = "${contacts.count { it.isEmergencyContact }} Emergency contacts ready to receive cellular SOS alerts.",
-                        color = TextPrimary,
-                        fontSize = 11.sp
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // Demo Simulation Box for Hackathon Presentation
-        if (isDemoMode) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
-                shape = RoundedCornerShape(12.dp)
+            // Open Live Monitor
+            OutlinedButton(
+                onClick = onNavigateToMonitoring,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, CharcoalBorder),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = CharcoalSurface)
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "Demo Simulation Quick Controls",
-                        color = AmberWarning,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                repository.triggerPossibleDistress("Scream / Distress Call")
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Simulate Scream", fontSize = 11.sp, color = CrimsonEmergency)
-                        }
+                Icon(
+                    imageVector = Icons.Default.GraphicEq,
+                    contentDescription = null,
+                    tint = EmeraldSafe,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Live Monitor", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
 
-                        OutlinedButton(
-                            onClick = {
-                                val nextState = if (wearable.state == DeviceConnectionState.CONNECTED) {
-                                    DeviceConnectionState.DISCONNECTED
-                                } else {
-                                    DeviceConnectionState.CONNECTED
-                                }
-                                repository.updateWearable(wearable.copy(state = nextState))
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                if (wearable.state == DeviceConnectionState.CONNECTED) "Disconnect BLE" else "Connect BLE",
-                                fontSize = 11.sp,
-                                color = CyanAccent
-                            )
-                        }
-                    }
-                }
+            // Open Safety Map
+            OutlinedButton(
+                onClick = onNavigateToMap,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, CharcoalBorder),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = CharcoalSurface)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Map,
+                    contentDescription = null,
+                    tint = BluePrimary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Safety Map", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
 
-        Spacer(modifier = Modifier.height(90.dp))
+        Spacer(modifier = Modifier.height(28.dp))
     }
+}
 
-    // On-Demand Mic Permission Dialog
-    if (showMicPermissionDialog) {
-        AlertDialog(
-            onDismissRequest = { showMicPermissionDialog = false },
-            title = { Text("Microphone Access Required", color = TextPrimary) },
-            text = {
-                Text(
-                    "SAFORA runs a local acoustic model on-device to classify distress screams in real-time. Audio is analyzed locally and never uploaded to the cloud.",
-                    color = TextSecondary
+@Composable
+fun TelemetrySymbolCard(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    label: String,
+    value: String,
+    accentColor: Color,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+        border = BorderStroke(1.dp, CharcoalBorder),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = accentColor,
+                    modifier = Modifier.size(18.dp)
                 )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showMicPermissionDialog = false
-                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
-                ) {
-                    Text("Grant Permission")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showMicPermissionDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-            containerColor = CharcoalSurfaceElevated
-        )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = label,
+                color = TextTertiary,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                color = TextPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
     }
 }

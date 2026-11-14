@@ -31,6 +31,7 @@ fun AppNavHost(initialNavigateToProfile: Boolean = false) {
 
     val bottomTabs = listOf(
         BottomNavTab.Home,
+        BottomNavTab.Monitor,
         BottomNavTab.SafetyMap,
         BottomNavTab.Vault,
         BottomNavTab.Profile
@@ -64,6 +65,7 @@ fun AppNavHost(initialNavigateToProfile: Boolean = false) {
                                 Icon(
                                     imageVector = when (tab) {
                                         BottomNavTab.Home -> Icons.Default.Shield
+                                        BottomNavTab.Monitor -> Icons.Default.GraphicEq
                                         BottomNavTab.SafetyMap -> Icons.Default.Map
                                         BottomNavTab.Vault -> Icons.Default.Lock
                                         BottomNavTab.Profile -> Icons.Default.Person

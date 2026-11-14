@@ -15,7 +15,8 @@ sealed class Screen(val route: String, val title: String) {
 
 sealed class BottomNavTab(val route: String, val label: String) {
     object Home : BottomNavTab(Screen.Dashboard.route, "Home")
+    object Monitor : BottomNavTab(Screen.Monitoring.route, "Live Shield")
     object SafetyMap : BottomNavTab(Screen.Map.route, "Map")
-    object Vault : BottomNavTab(Screen.Evidence.route, "Evidence")
+    object Vault : BottomNavTab(Screen.Evidence.route, "Vault")
     object Profile : BottomNavTab(Screen.Settings.route, "Profile")
 }
