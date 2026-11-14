@@ -2,13 +2,17 @@ package com.example.safora.features.monitoring
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +27,8 @@ import com.example.safora.data.model.AudioDetectionResult
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.services.audio.AudioMonitoringService
 import com.example.safora.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun MonitoringScreen(
@@ -32,15 +38,19 @@ fun MonitoringScreen(
     val context = LocalContext.current
     val isMonitoring by repository.isAudioMonitoring.collectAsState()
     val lastDetection by repository.lastAudioDetection.collectAsState()
+    val audioHistory by repository.audioHistory.collectAsState()
+    val sensitivity by repository.audioSensitivity.collectAsState()
 
-    val pulse = rememberInfiniteTransition(label = "mic_pulse").animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.08f,
+    // Pulsing waveform bars animation
+    val infiniteTransition = rememberInfiniteTransition(label = "audio_bars")
+    val barHeightMultiplier by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = EaseInOutQuad),
+            animation = tween(400, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulse"
+        label = "bars"
     )
 
     Column(
@@ -56,9 +66,13 @@ fun MonitoringScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = "Live Acoustic Shield",
                 style = MaterialTheme.typography.titleLarge,
@@ -67,104 +81,151 @@ fun MonitoringScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(30.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Mic Visualizer Indicator
+        // Simulated Waveform Bars / Mic Pulse
         Box(
             modifier = Modifier
-                .size(140.dp)
+                .size(130.dp)
                 .clip(CircleShape)
                 .background(
                     if (isMonitoring) EmeraldSafe.copy(alpha = 0.15f) else CharcoalSurfaceElevated
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isMonitoring) EmeraldSafe.copy(alpha = 0.35f) else CharcoalBorder
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
+            if (isMonitoring) {
+                // Real-time animated audio visualizer bars
+                Row(
+                    modifier = Modifier.width(70.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val heights = listOf(24.dp, 40.dp, 55.dp, 34.dp, 20.dp)
+                    heights.forEachIndexed { index, defaultHeight ->
+                        val animatedHeight = if (isMonitoring) {
+                            val factor = if (index % 2 == 0) barHeightMultiplier else (1.3f - barHeightMultiplier)
+                            defaultHeight * factor.coerceIn(0.4f, 1.2f)
+                        } else 6.dp
+
+                        Box(
+                            modifier = Modifier
+                                .width(6.dp)
+                                .height(animatedHeight)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(EmeraldSafe)
+                        )
+                    }
+                }
+            } else {
                 Icon(
-                    imageVector = if (isMonitoring) Icons.Default.Mic else Icons.Default.MicOff,
+                    imageVector = Icons.Default.MicOff,
                     contentDescription = null,
-                    tint = if (isMonitoring) EmeraldSafe else TextTertiary,
-                    modifier = Modifier.size(48.dp)
+                    tint = TextTertiary,
+                    modifier = Modifier.size(44.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Text(
-            text = if (isMonitoring) "LOCAL ML MODEL ACTIVE" else "MONITORING STOPPED",
+            text = if (isMonitoring) "LOCAL ON-DEVICE INFERENCE ACTIVE" else "ACOUSTIC SHIELD PAUSED",
             color = if (isMonitoring) EmeraldSafe else TextSecondary,
             fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
+            fontSize = 13.sp
         )
         Text(
-            text = "Audio analyzed on-device only. Zero audio sent to cloud.",
+            text = "Foreground Microphone Service • Zero Audio Leaves Device",
             color = TextTertiary,
             fontSize = 11.sp
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Last Detection Card
+        // Sensitivity Switcher Pill
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(CharcoalSurfaceElevated)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            listOf("Low", "Medium", "High").forEach { level ->
+                val isSelected = sensitivity == level
+                Surface(
+                    color = if (isSelected) BluePrimary else Color.Transparent,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .clickable { repository.setAudioSensitivity(level) }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "$level Sensitivity",
+                        color = if (isSelected) Color.White else TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Classification Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
             shape = RoundedCornerShape(14.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "LATEST ACOUSTIC CLASSIFICATION",
+                    text = "CURRENT AUDIO STREAM CLASSIFICATION",
                     color = TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Detected Class", color = TextSecondary, fontSize = 13.sp)
                     Text(
                         text = lastDetection.detectedClass,
                         color = if (lastDetection.detectedClass.contains("Scream")) CrimsonEmergency else EmeraldSafe,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
+                        fontSize = 14.sp
                     )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Model Confidence", color = TextSecondary, fontSize = 13.sp)
                     Text(
-                        text = "${(lastDetection.confidence * 100).toInt()}%",
+                        text = "${(lastDetection.confidence * 100).toInt()}% Confidence",
                         color = TextPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
                 }
+                Spacer(modifier = Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { lastDetection.confidence },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = if (lastDetection.detectedClass.contains("Scream")) CrimsonEmergency else EmeraldSafe,
+                    trackColor = CharcoalBorder
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Simulation Triggers for live testing
+        // Audio Detection Test Controls
         Text(
-            text = "AUDIO DETECTION TEST SUITE",
+            text = "SIMULATE CLASSIFICATION SAMPLES",
             color = TextSecondary,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start)
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -173,31 +234,84 @@ fun MonitoringScreen(
             OutlinedButton(
                 onClick = {
                     repository.updateAudioDetection(
-                        AudioDetectionResult("Scream / Distress Call", 0.95f, System.currentTimeMillis())
+                        AudioDetectionResult("Scream / Distress Call", 0.96f, System.currentTimeMillis())
                     )
                     repository.triggerPossibleDistress("Scream / Distress Call")
                 },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Scream Trigger", fontSize = 11.sp, color = CrimsonEmergency)
+                Text("Scream (96%)", fontSize = 11.sp, color = CrimsonEmergency)
             }
 
             OutlinedButton(
                 onClick = {
                     repository.updateAudioDetection(
-                        AudioDetectionResult("High Impact Thud", 0.88f, System.currentTimeMillis())
+                        AudioDetectionResult("Normal Speech / Ambient", 0.98f, System.currentTimeMillis())
                     )
-                    repository.triggerPossibleDistress("High Impact Thud")
                 },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Impact Trigger", fontSize = 11.sp, color = AmberWarning)
+                Text("Normal (98%)", fontSize = 11.sp, color = EmeraldSafe)
+            }
+
+            OutlinedButton(
+                onClick = {
+                    repository.updateAudioDetection(
+                        AudioDetectionResult("Sudden Impact / Thud", 0.91f, System.currentTimeMillis())
+                    )
+                    repository.triggerPossibleDistress("Sudden Impact / Thud")
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Impact (91%)", fontSize = 11.sp, color = AmberWarning)
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Audio history log
+        Text(
+            text = "RECENT AUDIO INFERENCES",
+            color = TextSecondary,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(audioHistory) { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CharcoalSurface)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = item.detectedClass,
+                        color = if (item.detectedClass.contains("Scream")) CrimsonEmergency else TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(item.timestamp)),
+                        color = TextTertiary,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         Button(
             onClick = {
@@ -209,15 +323,16 @@ fun MonitoringScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp),
+                .height(48.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isMonitoring) CrimsonEmergencyDark else EmeraldSafeDark
             ),
             shape = RoundedCornerShape(12.dp)
         ) {
             Text(
-                if (isMonitoring) "Pause Audio Shield" else "Resume Audio Shield",
-                fontWeight = FontWeight.Bold
+                if (isMonitoring) "Pause Safety Shield" else "Activate Safety Shield",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
             )
         }
     }

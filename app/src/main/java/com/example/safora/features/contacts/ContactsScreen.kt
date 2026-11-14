@@ -1,12 +1,16 @@
 package com.example.safora.features.contacts
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,6 +31,7 @@ fun ContactsScreen(
     onBack: () -> Unit
 ) {
     val repository = SaforaRepository.instance
+    val context = LocalContext.current
     val contacts by repository.contacts.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
@@ -47,9 +53,13 @@ fun ContactsScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
                 }
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Trusted Contacts",
                     style = MaterialTheme.typography.titleLarge,
@@ -63,10 +73,10 @@ fun ContactsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Text(
-            text = "Emergency alerts and live GPS link will be broadcast to these contacts during SOS.",
+            text = "During an SOS trigger, live GPS location and alerts are automatically sent to configured Emergency Contacts.",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
@@ -90,12 +100,17 @@ fun ContactsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(if (contact.isEmergencyContact) CrimsonEmergency.copy(alpha = 0.2f) else CharcoalSurfaceElevated),
+                                    .background(
+                                        if (contact.isEmergencyContact) CrimsonEmergency.copy(alpha = 0.2f) else CharcoalSurfaceElevated
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -106,11 +121,28 @@ fun ContactsScreen(
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text(
-                                    text = contact.name,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = contact.name,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    if (contact.isEmergencyContact) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = CrimsonEmergency.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "SOS RECIPIENT",
+                                                color = CrimsonEmergency,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
                                 Text(
                                     text = "${contact.phone} • ${contact.relationship}",
                                     color = TextSecondary,
@@ -119,12 +151,38 @@ fun ContactsScreen(
                             }
                         }
 
-                        IconButton(onClick = { repository.removeContact(contact.id) }) {
-                            Icon(
-                                Icons.Default.DeleteOutline,
-                                contentDescription = "Remove",
-                                tint = TextTertiary
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Test Call Button
+                            IconButton(
+                                onClick = {
+                                    val intent = Intent(Intent.ACTION_DIAL).apply {
+                                        data = Uri.parse("tel:${contact.phone.filter { it.isDigit() || it == '+' }}")
+                                    }
+                                    context.startActivity(intent)
+                                }
+                            ) {
+                                Icon(Icons.Default.Phone, contentDescription = "Call", tint = EmeraldSafe, modifier = Modifier.size(18.dp))
+                            }
+
+                            // Toggle Emergency Status
+                            IconButton(onClick = { repository.toggleEmergencyContact(contact.id) }) {
+                                Icon(
+                                    imageVector = if (contact.isEmergencyContact) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                                    contentDescription = "Toggle SOS",
+                                    tint = if (contact.isEmergencyContact) CrimsonEmergency else TextTertiary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Remove
+                            IconButton(onClick = { repository.removeContact(contact.id) }) {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = "Remove",
+                                    tint = TextTertiary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -141,7 +199,7 @@ fun ContactsScreen(
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text("Name") },
+                        label = { Text("Contact Name") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -155,7 +213,7 @@ fun ContactsScreen(
                     OutlinedTextField(
                         value = newRelation,
                         onValueChange = { newRelation = it },
-                        label = { Text("Relationship") },
+                        label = { Text("Relationship (e.g. Sibling, Friend)") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -179,7 +237,7 @@ fun ContactsScreen(
                         }
                     }
                 ) {
-                    Text("Add")
+                    Text("Save Contact")
                 }
             },
             dismissButton = {

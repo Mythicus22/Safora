@@ -1,12 +1,15 @@
 package com.example.safora.features.device
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,10 +17,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.safora.data.model.DeviceConnectionState
+import com.example.safora.data.model.DiscoveredBleDevice
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.ui.theme.*
 
@@ -27,7 +32,9 @@ fun DevicePairingScreen(
 ) {
     val repository = SaforaRepository.instance
     val wearable by repository.wearable.collectAsState()
-    var isScanning by remember { mutableStateOf(false) }
+    val discoveredDevices by repository.discoveredDevices.collectAsState()
+
+    var showConsoleLogs by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -38,23 +45,34 @@ fun DevicePairingScreen(
         // App bar
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Wearable Necklace",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "SAFORA Wearable Setup",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+
+            TextButton(onClick = { showConsoleLogs = !showConsoleLogs }) {
+                Text(if (showConsoleLogs) "Hide Logs" else "BLE Logs", color = CyanAccent, fontSize = 12.sp)
+            }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Current status card
+        // Device Connection Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
@@ -74,37 +92,37 @@ fun DevicePairingScreen(
                             color = TextPrimary
                         )
                         Text(
-                            text = "BLE: ${wearable.address}",
+                            text = "BLE MAC: ${wearable.address}",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (wearable.state == DeviceConnectionState.CONNECTED) EmeraldSafe else TextTertiary
-                            )
-                    )
+                    Surface(
+                        color = when (wearable.state) {
+                            DeviceConnectionState.CONNECTED -> EmeraldSafe.copy(alpha = 0.2f)
+                            DeviceConnectionState.CONNECTING -> AmberWarning.copy(alpha = 0.2f)
+                            DeviceConnectionState.SCANNING -> BluePrimary.copy(alpha = 0.2f)
+                            DeviceConnectionState.DISCONNECTED -> CharcoalDark
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = wearable.state.name,
+                            color = when (wearable.state) {
+                                DeviceConnectionState.CONNECTED -> EmeraldSafe
+                                DeviceConnectionState.CONNECTING -> AmberWarning
+                                DeviceConnectionState.SCANNING -> BluePrimary
+                                DeviceConnectionState.DISCONNECTED -> TextTertiary
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Connection State", color = TextSecondary, fontSize = 12.sp)
-                    Text(
-                        text = wearable.state.name,
-                        color = if (wearable.state == DeviceConnectionState.CONNECTED) EmeraldSafe else TextPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -118,10 +136,10 @@ fun DevicePairingScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Camera Recording State", color = TextSecondary, fontSize = 12.sp)
+                    Text("ESP32-CAM Status", color = TextSecondary, fontSize = 12.sp)
                     Text(
-                        if (wearable.isRecording) "RECORDING" else "STANDBY",
-                        color = if (wearable.isRecording) CrimsonEmergency else TextTertiary,
+                        if (wearable.isRecording) "RECORDING (MicroSD Segments)" else "STANDBY (OV2640 Ready)",
+                        color = if (wearable.isRecording) CrimsonEmergency else EmeraldSafe,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
@@ -129,26 +147,35 @@ fun DevicePairingScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Connect / Scan / Disconnect Button Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            val nextState = if (wearable.state == DeviceConnectionState.CONNECTED) {
-                                DeviceConnectionState.DISCONNECTED
-                            } else {
-                                DeviceConnectionState.CONNECTED
-                            }
-                            repository.updateWearable(wearable.copy(state = nextState))
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (wearable.state == DeviceConnectionState.CONNECTED) CrimsonEmergencyDark else BluePrimary
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text(if (wearable.state == DeviceConnectionState.CONNECTED) "Disconnect" else "Connect BLE")
+                    if (wearable.state == DeviceConnectionState.CONNECTED) {
+                        Button(
+                            onClick = { repository.disconnectWearable() },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = CrimsonEmergencyDark),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Disconnect BLE")
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                if (wearable.state == DeviceConnectionState.SCANNING) {
+                                    repository.stopBleScan()
+                                } else {
+                                    repository.startBleScan()
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(if (wearable.state == DeviceConnectionState.SCANNING) "Stop Scan" else "Scan for BLE")
+                        }
                     }
 
                     OutlinedButton(
@@ -159,60 +186,171 @@ fun DevicePairingScreen(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
-                            if (wearable.isRecording) "Stop Capture" else "Test Start Cam",
-                            color = if (wearable.isRecording) CrimsonEmergency else TextPrimary
+                            if (wearable.isRecording) "Stop Recording" else "Test Camera Capture",
+                            color = if (wearable.isRecording) CrimsonEmergency else TextPrimary,
+                            fontSize = 11.sp
                         )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // BLE Technical Configuration Box
-        Text(
-            text = "HARDWARE GATT SPECIFICATION",
-            color = TextSecondary,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "Service UUID: 7c1e0001-8a4b-4f3c-9d2e-1b6a5c7d0001",
-                    color = TextSecondary,
-                    fontSize = 10.sp
-                )
-                Text(
-                    text = "Command Char: 7c1e0002 (START_RECORD / STOP_RECORD)",
-                    color = TextSecondary,
-                    fontSize = 10.sp
-                )
-                Text(
-                    text = "Status Char: 7c1e0003 | Events Char: 7c1e0004 (MANUAL_SOS)",
-                    color = TextSecondary,
-                    fontSize = 10.sp
-                )
+        // Real-time Console Log Overlay
+        AnimatedVisibility(visible = showConsoleLogs) {
+            Column(modifier = Modifier.padding(top = 10.dp)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(130.dp),
+                    colors = CardDefaults.cardColors(containerColor = CharcoalDark),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp)
+                    ) {
+                        items(wearable.consoleLogs) { log ->
+                            Text(
+                                text = log,
+                                color = EmeraldSafe,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Discovered Devices List (when scanning)
+        if (wearable.state == DeviceConnectionState.SCANNING || discoveredDevices.isNotEmpty()) {
+            Text(
+                text = "DISCOVERED BLE PERIPHERALS",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                items(discoveredDevices) { device ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { repository.connectToDevice(device) },
+                        colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = device.name,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    if (device.isSaforaDevice) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = BluePrimary.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "SAFORA",
+                                                color = BluePrimary,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = "${device.address} • Signal: ${device.rssi} dBm",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Button(
+                                onClick = { repository.connectToDevice(device) },
+                                colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Text("Pair", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // BLE GATT Technical details
+            Text(
+                text = "CONFIGURED HARDWARE BLE GATT PROFILE",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "Primary Service: 7c1e0001-8a4b-4f3c-9d2e-1b6a5c7d0001",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "Write Command Char: 7c1e0002 (START_RECORD / STOP_RECORD)",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = "Notify Event Char: 7c1e0004 (MANUAL_SOS, RECORDING_STARTED)",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Wearable Physical Button Trigger Simulation
         Button(
             onClick = {
                 repository.confirmSos("ESP32_PHYSICAL_SOS_BUTTON")
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
             colors = ButtonDefaults.buttonColors(containerColor = AmberWarning),
             shape = RoundedCornerShape(10.dp)
         ) {
-            Text("Simulate Wearable Necklace Physical SOS Press", color = Color.Black, fontWeight = FontWeight.Bold)
+            Icon(Icons.Default.TouchApp, contentDescription = null, tint = Color.Black)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Simulate Wearable Necklace Physical Button Press", color = Color.Black, fontWeight = FontWeight.Bold)
         }
     }
 }

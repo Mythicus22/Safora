@@ -1,12 +1,13 @@
 package com.example.safora.features.map
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.safora.data.model.IncidentState
+import com.example.safora.data.model.Responder
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.ui.theme.*
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -34,6 +37,7 @@ fun MapScreen() {
     val incident by repository.currentIncident.collectAsState()
 
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
+    var selectedResponder by remember { mutableStateOf<Responder?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // OpenStreetMap Android View
@@ -42,7 +46,7 @@ fun MapScreen() {
                 MapView(ctx).apply {
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
-                    controller.setZoom(16.0)
+                    controller.setZoom(16.5)
                     controller.setCenter(GeoPoint(location.first, location.second))
                     mapViewRef = this
                 }
@@ -54,7 +58,7 @@ fun MapScreen() {
                 val userGeo = GeoPoint(location.first, location.second)
                 val userMarker = Marker(mapView).apply {
                     position = userGeo
-                    title = "You (Live SAFORA GPS)"
+                    title = "You (SAFORA GPS Active)"
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 }
                 mapView.overlays.add(userMarker)
@@ -63,8 +67,12 @@ fun MapScreen() {
                 responders.forEach { responder ->
                     val respMarker = Marker(mapView).apply {
                         position = GeoPoint(responder.latitude, responder.longitude)
-                        title = "${responder.name} (${responder.distanceMeters}m away)"
+                        title = "${responder.name} • ${responder.distanceMeters}m"
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        setOnMarkerClickListener { _, _ ->
+                            selectedResponder = responder
+                            true
+                        }
                     }
                     mapView.overlays.add(respMarker)
                 }
@@ -74,13 +82,13 @@ fun MapScreen() {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Floating Info Card on top of map
+        // Floating Top Header Card
         Card(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(16.dp)
                 .fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CharcoalDark.copy(alpha = 0.92f)),
+            colors = CardDefaults.cardColors(containerColor = CharcoalDark.copy(alpha = 0.94f)),
             shape = RoundedCornerShape(12.dp)
         ) {
             Row(
@@ -92,41 +100,55 @@ fun MapScreen() {
             ) {
                 Column {
                     Text(
-                        text = "SAFETY PATROL DISPATCH",
+                        text = "SAFETY PATROL NETWORK",
                         color = TextSecondary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${responders.count { it.isAvailable }} Responders Nearby",
+                        text = "${responders.count { it.isAvailable }} Responders Within 1km",
                         color = EmeraldSafe,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                 }
 
-                IconButton(
-                    onClick = {
-                        mapViewRef?.controller?.animateTo(GeoPoint(location.first, location.second))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = {
+                            mapViewRef?.controller?.zoomIn()
+                        }
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = TextPrimary)
                     }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Center on me",
-                        tint = BluePrimary
-                    )
+                    IconButton(
+                        onClick = {
+                            mapViewRef?.controller?.zoomOut()
+                        }
+                    ) {
+                        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = TextPrimary)
+                    }
+                    IconButton(
+                        onClick = {
+                            mapViewRef?.controller?.animateTo(GeoPoint(location.first, location.second))
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Center on me",
+                            tint = BluePrimary
+                        )
+                    }
                 }
             }
         }
 
-        // Active incident banner if SOS triggered
-        if (incident.state != com.example.safora.data.model.IncidentState.IDLE &&
-            incident.state != com.example.safora.data.model.IncidentState.RESOLVED
-        ) {
+        // Active Incident Banner
+        if (incident.state != IncidentState.IDLE && incident.state != IncidentState.RESOLVED && incident.state != IncidentState.CANCELLED) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 90.dp)
+                    .padding(horizontal = 16.dp, vertical = 84.dp)
                     .fillMaxWidth(),
                 color = CrimsonEmergencyDark,
                 shape = RoundedCornerShape(12.dp)
@@ -138,16 +160,49 @@ fun MapScreen() {
                 ) {
                     Column {
                         Text(
-                            text = "ACTIVE INCIDENT DISPATCH",
+                            text = "INCIDENT LOCATION BROADCASTING",
                             color = Color.White,
                             fontWeight = FontWeight.Black,
                             fontSize = 12.sp
                         )
                         Text(
-                            text = "Broadcasting GPS to opted-in responders",
-                            color = Color.White.copy(alpha = 0.8f),
+                            text = "Broadcasting GPS to ${responders.size} nearby community responders",
+                            color = Color.White.copy(alpha = 0.85f),
                             fontSize = 11.sp
                         )
+                    }
+                }
+            }
+        }
+
+        // Selected Responder Detail Bottom Card
+        AnimatedVisibility(
+            visible = selectedResponder != null,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = if (incident.state != IncidentState.IDLE) 150.dp else 84.dp)
+        ) {
+            selectedResponder?.let { resp ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(resp.name, fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                            Text("${resp.role} • ${resp.distanceMeters}m away • ETA ~${resp.etaMinutes} min", color = TextSecondary, fontSize = 11.sp)
+                            Text("Rating: ${resp.rating} ★ (Opted-in Verified Responder)", color = AmberWarning, fontSize = 11.sp)
+                        }
+                        IconButton(onClick = { selectedResponder = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = TextTertiary)
+                        }
                     }
                 }
             }

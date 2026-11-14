@@ -27,6 +27,12 @@ fun SettingsScreen(
     val repository = SaforaRepository.instance
     val user by repository.user.collectAsState()
     val isDemoMode by repository.isDemoMode.collectAsState()
+    val isMonitoring by repository.isAudioMonitoring.collectAsState()
+
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var editName by remember { mutableStateOf(user.name) }
+    var editPhone by remember { mutableStateOf(user.phone) }
+    var editBlood by remember { mutableStateOf(user.bloodGroup) }
 
     Column(
         modifier = Modifier
@@ -38,45 +44,62 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "PROFILE & SETTINGS",
+            text = "PROFILE & PREFERENCES",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Black,
             color = Color.White
         )
         Text(
-            text = "System preferences, wearable link and permissions",
+            text = "System settings, safety triggers and hardware management",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         // Profile Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = user.name,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = TextPrimary
-                )
-                Text(
-                    text = "${user.phone} • Blood: ${user.bloodGroup}",
-                    color = TextSecondary,
-                    fontSize = 12.sp
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = user.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "${user.phone} • Blood: ${user.bloodGroup}",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    TextButton(onClick = {
+                        editName = user.name
+                        editPhone = user.phone
+                        editBlood = user.bloodGroup
+                        showEditProfileDialog = true
+                    }) {
+                        Text("Edit", color = BluePrimary)
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Settings items
+        // Device & Safety Controls
         Text(
-            text = "DEVICE & SAFETY",
+            text = "SAFETY SHORTCUTS",
             color = TextSecondary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold
@@ -91,7 +114,7 @@ fun SettingsScreen(
             Column {
                 ListItem(
                     headlineContent = { Text("Wearable Pairing & BLE", color = TextPrimary) },
-                    supportingContent = { Text("Manage ESP32 necklace link", color = TextSecondary) },
+                    supportingContent = { Text("Manage ESP32 necklace link & GATT logs", color = TextSecondary) },
                     trailingContent = {
                         IconButton(onClick = onNavigateToPairing) {
                             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextSecondary)
@@ -99,10 +122,10 @@ fun SettingsScreen(
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent)
                 )
-                Divider(color = CharcoalBorder)
+                HorizontalDivider(color = CharcoalBorder)
                 ListItem(
                     headlineContent = { Text("Emergency Contacts", color = TextPrimary) },
-                    supportingContent = { Text("Configure recipients for SOS alerts", color = TextSecondary) },
+                    supportingContent = { Text("Recipients for SOS broadcast alerts", color = TextSecondary) },
                     trailingContent = {
                         IconButton(onClick = onNavigateToContacts) {
                             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextSecondary)
@@ -115,7 +138,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Hackathon Demo Mode Switch
+        // Demo Mode Switch
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
@@ -128,9 +151,9 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("Hackathon Demo Mode", fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("Enables on-screen simulation controls", color = TextSecondary, fontSize = 11.sp)
+                    Text("Shows on-screen simulation triggers across screens", color = TextSecondary, fontSize = 11.sp)
                 }
                 Switch(
                     checked = isDemoMode,
@@ -141,7 +164,7 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Reset demo data button
+        // Reset Demo Data
         OutlinedButton(
             onClick = {
                 repository.updateUser(User())
@@ -149,9 +172,62 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp)
         ) {
-            Text("Reset Demo Data to Defaults", color = TextTertiary)
+            Text("Reset Demo Data to Initial State", color = TextTertiary)
         }
 
         Spacer(modifier = Modifier.height(90.dp))
+    }
+
+    if (showEditProfileDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditProfileDialog = false },
+            title = { Text("Edit User Profile", color = TextPrimary) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Name") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editPhone,
+                        onValueChange = { editPhone = it },
+                        label = { Text("Phone") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = editBlood,
+                        onValueChange = { editBlood = it },
+                        label = { Text("Blood Group") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        repository.updateUser(
+                            user.copy(
+                                name = editName,
+                                phone = editPhone,
+                                bloodGroup = editBlood
+                            )
+                        )
+                        showEditProfileDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditProfileDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 }

@@ -2,8 +2,10 @@ package com.example.safora.features.emergency
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -18,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,7 +41,7 @@ fun EmergencyScreen(
     val contacts by repository.contacts.collectAsState()
     val location by repository.currentLocation.collectAsState()
 
-    // Countdown timer for VERIFYING stage
+    var showCancelDialog by remember { mutableStateOf(false) }
     var countdownSeconds by remember { mutableStateOf(5) }
 
     LaunchedEffect(incident.state) {
@@ -48,9 +51,8 @@ fun EmergencyScreen(
                 delay(1000)
                 countdownSeconds -= 1
             }
-            // Auto confirm SOS if user didn't cancel
             if (incident.state == IncidentState.VERIFYING) {
-                repository.confirmSos("AUTO_VERIFIED_DISTRESS")
+                repository.confirmSos("AUTOMATIC_VERIFIED_DISTRESS")
             }
         }
     }
@@ -58,7 +60,7 @@ fun EmergencyScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(CharcoalDark)
+            .background(if (incident.state == IncidentState.VERIFYING) CharcoalDark else CharcoalDark)
             .padding(20.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -83,7 +85,7 @@ fun EmergencyScreen(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (incident.state == IncidentState.VERIFYING) "VERIFYING DISTRESS..." else "CONFIRMED EMERGENCY SOS",
+                    text = if (incident.state == IncidentState.VERIFYING) "STAGE 1: VERIFYING DISTRESS..." else "STAGE 2: CONFIRMED EMERGENCY SOS",
                     color = if (incident.state == IncidentState.VERIFYING) AmberWarning else CrimsonEmergency,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -91,9 +93,9 @@ fun EmergencyScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // If in countdown verification stage
+        // STAGE 1: VERIFYING COUNTDOWN
         if (incident.state == IncidentState.VERIFYING) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -101,14 +103,14 @@ fun EmergencyScreen(
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(22.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         text = "POSSIBLE DISTRESS DETECTED",
                         color = AmberWarning,
                         fontWeight = FontWeight.Black,
-                        fontSize = 16.sp
+                        fontSize = 17.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
@@ -116,19 +118,32 @@ fun EmergencyScreen(
                         color = TextSecondary,
                         fontSize = 12.sp
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Countdown Ring Box
+                    Box(
+                        modifier = Modifier
+                            .size(110.dp)
+                            .clip(CircleShape)
+                            .background(AmberWarning.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "$countdownSeconds",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 50.sp
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = "$countdownSeconds",
-                        color = Color.White,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 54.sp
-                    )
-                    Text(
-                        text = "Confirming emergency unless cancelled",
+                        text = "Auto-triggering SOS & wearable camera in $countdownSeconds s",
                         color = TextTertiary,
                         fontSize = 11.sp
                     )
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -141,11 +156,12 @@ fun EmergencyScreen(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("I Am Safe (Cancel)", color = EmeraldSafe)
+                            Text("False Alarm / I'm Safe", color = EmeraldSafe, fontSize = 11.sp)
                         }
+
                         Button(
                             onClick = {
-                                repository.confirmSos("USER_CONFIRMED_PROMPT")
+                                repository.confirmSos("USER_CONFIRMED_IMMEDIATE")
                             },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = CrimsonEmergency),
@@ -157,22 +173,22 @@ fun EmergencyScreen(
                 }
             }
         } else {
-            // Confirmed SOS Active screen
+            // STAGE 2: CONFIRMED EMERGENCY SOS
             Text(
-                text = "EMERGENCY DISPATCH ACTIVE",
-                style = MaterialTheme.typography.headlineSmall,
+                text = "EMERGENCY DISPATCH IN PROGRESS",
+                style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Black,
                 color = CrimsonEmergency
             )
             Text(
-                text = "Incident ID: ${incident.id}",
+                text = "Incident ID: ${incident.id} • Trigger: ${incident.triggerSource}",
                 color = TextSecondary,
-                fontSize = 12.sp
+                fontSize = 11.sp
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Action: Direct Call 112 (India National Emergency Number)
+            // Action: Direct Call 112
             Button(
                 onClick = {
                     val intent = Intent(Intent.ACTION_DIAL).apply {
@@ -196,9 +212,31 @@ fun EmergencyScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Incident Metrics
+            // Quick Alert Share Button
+            OutlinedButton(
+                onClick = {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(
+                            Intent.EXTRA_TEXT,
+                            "EMERGENCY! I need immediate help. My current SAFORA GPS location is: https://maps.google.com/?q=${location.first},${location.second} (Incident ID: ${incident.id})"
+                        )
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "Share Emergency Location"))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null, tint = BluePrimary, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Share Live GPS & Incident Link via SMS / WhatsApp", color = BluePrimary, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Dispatch Metrics Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
@@ -206,65 +244,65 @@ fun EmergencyScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "INCIDENT DISPATCH STATUS",
+                        text = "INCIDENT DISPATCH COORDINATION",
                         color = TextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("GPS Coordinates", color = TextSecondary, fontSize = 13.sp)
+                        Text("GPS Location", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            "${"%.4f".format(location.first)}, ${"%.4f".format(location.second)}",
+                            "${"%.4f".format(location.first)}, ${"%.4f".format(location.second)} (Accuracy: 5m)",
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Wearable Camera", color = TextSecondary, fontSize = 13.sp)
+                        Text("ESP32 Wearable Camera", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            if (wearable.isRecording) "RECORDING (ESP32-CAM)" else "IDLE",
+                            if (wearable.isRecording) "RECORDING MicroSD SEGMENTS" else "STANDBY",
                             color = if (wearable.isRecording) CrimsonEmergency else TextTertiary,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Emergency Contacts Alerted", color = TextSecondary, fontSize = 13.sp)
+                        Text("Emergency Contacts Alerted", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            "${contacts.count { it.isEmergencyContact }} Contacts",
+                            "${contacts.count { it.isEmergencyContact }} Contacts (${contacts.filter { it.isEmergencyContact }.joinToString { it.name.split(" ")[0] }})",
                             color = EmeraldSafe,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Evidence Transfer", color = TextSecondary, fontSize = 13.sp)
+                        Text("Evidence Encryption", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            "Wi-Fi Sync (AES-256 GCM)",
+                            "AES-256 GCM Authenticated",
                             color = CyanAccent,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -272,7 +310,35 @@ fun EmergencyScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Secondary Buttons
+            // Live Timeline Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "INCIDENT AUDIT LOG",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    incident.timeline.forEach { entry ->
+                        Text(
+                            text = entry,
+                            color = TextPrimary,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Actions Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -286,10 +352,7 @@ fun EmergencyScreen(
                 }
 
                 Button(
-                    onClick = {
-                        repository.resolveIncident()
-                        onDismissToDashboard()
-                    },
+                    onClick = { showCancelDialog = true },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldSafeDark),
                     shape = RoundedCornerShape(10.dp)
@@ -300,5 +363,36 @@ fun EmergencyScreen(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+
+    if (showCancelDialog) {
+        AlertDialog(
+            onDismissRequest = { showCancelDialog = false },
+            title = { Text("Resolve Active Emergency?", color = TextPrimary) },
+            text = {
+                Text(
+                    "This will stop wearable recording, notify responders that you are safe, and archive the incident.",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        repository.resolveIncident()
+                        showCancelDialog = false
+                        onDismissToDashboard()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSafeDark)
+                ) {
+                    Text("I Am Safe (Resolve)")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelDialog = false }) {
+                    Text("Keep Active")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 }

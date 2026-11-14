@@ -1,10 +1,12 @@
 package com.example.safora.features.evidence
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -13,7 +15,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,8 +32,10 @@ fun EvidenceScreen() {
     val repository = SaforaRepository.instance
     val evidenceList by repository.evidenceList.collectAsState()
     val esp32Host by repository.esp32WifiHost.collectAsState()
-    var selectedSegment by remember { mutableStateOf<EvidenceSegment?>(null) }
+
     var hostInput by remember { mutableStateOf(esp32Host) }
+    var selectedSegment by remember { mutableStateOf<EvidenceSegment?>(null) }
+    var isSimulatingWifiPull by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -39,21 +45,35 @@ fun EvidenceScreen() {
     ) {
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = "EVIDENCE VAULT",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black,
-            color = Color.White
-        )
-        Text(
-            text = "MicroSD Wi-Fi Transfer & AES-256 Authenticated Encryption",
-            style = MaterialTheme.typography.bodySmall,
-            color = TextSecondary
-        )
+        // Title Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "EVIDENCE VAULT",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
+                )
+                Text(
+                    text = "Wi-Fi MicroSD Ingestion & AES-256 GCM Authenticated",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+            }
 
-        Spacer(modifier = Modifier.height(16.dp))
+            // Sync All Button
+            IconButton(onClick = { repository.syncAllEvidence() }) {
+                Icon(Icons.Default.CloudSync, contentDescription = "Sync All", tint = BluePrimary)
+            }
+        }
 
-        // Wi-Fi Endpoint Configuration Card
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // ESP32 Wi-Fi SoftAP Configuration Bar
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
@@ -61,7 +81,7 @@ fun EvidenceScreen() {
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "ESP32-CAM Wi-Fi SoftAP Receiver",
+                    text = "ESP32-CAM Wi-Fi SoftAP Receiver Endpoint",
                     color = CyanAccent,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -71,7 +91,7 @@ fun EvidenceScreen() {
                     OutlinedTextField(
                         value = hostInput,
                         onValueChange = { hostInput = it },
-                        label = { Text("ESP32 IP / Host") },
+                        label = { Text("SoftAP IP (e.g. 192.168.4.1)") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
@@ -83,9 +103,7 @@ fun EvidenceScreen() {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = {
-                            repository.setEsp32WifiHost(hostInput)
-                        },
+                        onClick = { repository.setEsp32WifiHost(hostInput) },
                         colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
                         shape = RoundedCornerShape(8.dp)
                     ) {
@@ -95,9 +113,9 @@ fun EvidenceScreen() {
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Trigger manual Wi-Fi Segment pull (Mock/Test button)
+        // Pull Evidence Test Action
         Button(
             onClick = {
                 val newSegNum = evidenceList.size + 1
@@ -106,9 +124,10 @@ fun EvidenceScreen() {
                     incidentId = "INC-8921",
                     segmentNumber = newSegNum,
                     timestamp = System.currentTimeMillis(),
-                    fileSizeKb = (380..450).random(),
+                    fileSizeKb = (395..460).random(),
                     isEncrypted = true,
-                    isUploaded = false
+                    isUploaded = false,
+                    sha256Hash = UUID.randomUUID().toString().replace("-", "") + "fa90"
                 )
                 repository.addEvidenceSegment(newSeg)
             },
@@ -116,14 +135,14 @@ fun EvidenceScreen() {
             colors = ButtonDefaults.buttonColors(containerColor = CharcoalSurfaceElevated),
             shape = RoundedCornerShape(10.dp)
         ) {
-            Icon(Icons.Default.Wifi, contentDescription = null, tint = CyanAccent)
+            Icon(Icons.Default.Wifi, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Simulate Ingesting Segment From ESP32-CAM", color = TextPrimary, fontSize = 12.sp)
+            Text("Simulate Ingesting Frame Segment from ESP32", color = TextPrimary, fontSize = 12.sp)
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Evidence segments list
+        // Evidence segments timeline list
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -131,7 +150,9 @@ fun EvidenceScreen() {
         ) {
             items(evidenceList) { segment ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedSegment = segment },
                     colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -145,13 +166,13 @@ fun EvidenceScreen() {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(44.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(CharcoalSurfaceElevated),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    Icons.Default.VideoCameraBack,
+                                    Icons.Default.Videocam,
                                     contentDescription = null,
                                     tint = CrimsonEmergency
                                 )
@@ -164,7 +185,7 @@ fun EvidenceScreen() {
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = "${segment.fileSizeKb} KB • ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(segment.timestamp))}",
+                                    text = "${segment.fileSizeKb} KB • ${segment.durationSeconds}s • ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(segment.timestamp))}",
                                     color = TextSecondary,
                                     fontSize = 11.sp
                                 )
@@ -177,7 +198,7 @@ fun EvidenceScreen() {
                                 shape = RoundedCornerShape(4.dp)
                             ) {
                                 Text(
-                                    text = "AES-GCM",
+                                    text = "AES-256 GCM",
                                     color = EmeraldSafe,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
@@ -186,7 +207,7 @@ fun EvidenceScreen() {
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = if (segment.isUploaded) "Cloud Synced" else "Stored Locally",
+                                text = if (segment.isUploaded) "Cloud Synced ✓" else "Stored on Phone",
                                 color = if (segment.isUploaded) CyanAccent else TextTertiary,
                                 fontSize = 10.sp
                             )
@@ -195,5 +216,76 @@ fun EvidenceScreen() {
                 }
             }
         }
+    }
+
+    // Segment Detail / Preview Dialog
+    selectedSegment?.let { segment ->
+        AlertDialog(
+            onDismissRequest = { selectedSegment = null },
+            title = {
+                Text(
+                    text = "Evidence Segment #${segment.segmentNumber}",
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column {
+                    // Synthetic Frame Canvas Preview
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            // Draw grid lines
+                            val gridColor = Color.DarkGray.copy(alpha = 0.5f)
+                            drawLine(gridColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1f)
+                            drawLine(gridColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = 1f)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("ESP32-CAM JPEG FRAME CAPTURE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(segment.resolution, color = TextSecondary, fontSize = 9.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Duration: ${segment.durationSeconds} seconds (~10 JPEG frames)", color = TextPrimary, fontSize = 12.sp)
+                    Text("Size: ${segment.fileSizeKb} KB", color = TextSecondary, fontSize = 11.sp)
+                    Text("Cipher: AES-GCM (Authenticated)", color = EmeraldSafe, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Integrity SHA-256 Hash:", color = TextSecondary, fontSize = 10.sp)
+                    Text(
+                        segment.sha256Hash,
+                        color = TextPrimary,
+                        fontSize = 9.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val updated = segment.copy(isUploaded = true)
+                        repository.addEvidenceSegment(updated)
+                        selectedSegment = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
+                ) {
+                    Text("Simulate Cloud Upload")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedSegment = null }) {
+                    Text("Close")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 }
