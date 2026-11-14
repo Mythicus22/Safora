@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,13 +30,13 @@ import java.util.*
 
 @Composable
 fun EvidenceScreen() {
-    val repository = SaforaRepository.instance
+    val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val evidenceList by repository.evidenceList.collectAsState()
     val esp32Host by repository.esp32WifiHost.collectAsState()
 
     var hostInput by remember { mutableStateOf(esp32Host) }
     var selectedSegment by remember { mutableStateOf<EvidenceSegment?>(null) }
-    var isSimulatingWifiPull by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -66,8 +67,10 @@ fun EvidenceScreen() {
             }
 
             // Sync All Button
-            IconButton(onClick = { repository.syncAllEvidence() }) {
-                Icon(Icons.Default.CloudSync, contentDescription = "Sync All", tint = BluePrimary)
+            if (evidenceList.isNotEmpty()) {
+                IconButton(onClick = { repository.syncAllEvidence() }) {
+                    Icon(Icons.Default.CloudSync, contentDescription = "Sync All", tint = BluePrimary)
+                }
             }
         }
 
@@ -115,7 +118,7 @@ fun EvidenceScreen() {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Pull Evidence Test Action
+        // Ingest Evidence Action
         Button(
             onClick = {
                 val newSegNum = evidenceList.size + 1
@@ -140,77 +143,108 @@ fun EvidenceScreen() {
             Text("Simulate Ingesting Frame Segment from ESP32", color = TextPrimary, fontSize = 12.sp)
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Evidence segments timeline list
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 90.dp)
-        ) {
-            items(evidenceList) { segment ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { selectedSegment = segment },
-                    colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
+        if (evidenceList.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.LockClock,
+                        contentDescription = null,
+                        tint = TextTertiary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "No Evidence Recorded",
+                        color = TextSecondary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "When an SOS incident is triggered, 5-second camera\nsegments from the ESP32 will appear here.",
+                        color = TextTertiary,
+                        fontSize = 11.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            // Evidence segments timeline list
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(bottom = 90.dp)
+            ) {
+                items(evidenceList) { segment ->
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .clickable { selectedSegment = segment },
+                        colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(CharcoalSurfaceElevated),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Videocam,
-                                    contentDescription = null,
-                                    tint = CrimsonEmergency
-                                )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(CharcoalSurfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Videocam,
+                                        contentDescription = null,
+                                        tint = CrimsonEmergency
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Segment #${segment.segmentNumber}",
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "${segment.fileSizeKb} KB • ${segment.durationSeconds}s • ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(segment.timestamp))}",
+                                        color = TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Segment #${segment.segmentNumber}",
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                                Text(
-                                    text = "${segment.fileSizeKb} KB • ${segment.durationSeconds}s • ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(segment.timestamp))}",
-                                    color = TextSecondary,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
 
-                        Column(horizontalAlignment = Alignment.End) {
-                            Surface(
-                                color = EmeraldSafe.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                Surface(
+                                    color = EmeraldSafe.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "AES-256 GCM",
+                                        color = EmeraldSafe,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "AES-256 GCM",
-                                    color = EmeraldSafe,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    text = if (segment.isUploaded) "Cloud Synced ✓" else "Stored on Phone",
+                                    color = if (segment.isUploaded) CyanAccent else TextTertiary,
+                                    fontSize = 10.sp
                                 )
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (segment.isUploaded) "Cloud Synced ✓" else "Stored on Phone",
-                                color = if (segment.isUploaded) CyanAccent else TextTertiary,
-                                fontSize = 10.sp
-                            )
                         }
                     }
                 }
@@ -241,7 +275,6 @@ fun EvidenceScreen() {
                         contentAlignment = Alignment.Center
                     ) {
                         Canvas(modifier = Modifier.fillMaxSize()) {
-                            // Draw grid lines
                             val gridColor = Color.DarkGray.copy(alpha = 0.5f)
                             drawLine(gridColor, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1f)
                             drawLine(gridColor, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = 1f)

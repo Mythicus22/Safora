@@ -1,5 +1,7 @@
 package com.example.safora.features.monitoring
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.safora.core.utils.PermissionHelper
 import com.example.safora.data.model.AudioDetectionResult
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.services.audio.AudioMonitoringService
@@ -34,12 +36,22 @@ import java.util.*
 fun MonitoringScreen(
     onBack: () -> Unit
 ) {
-    val repository = SaforaRepository.instance
     val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val isMonitoring by repository.isAudioMonitoring.collectAsState()
     val lastDetection by repository.lastAudioDetection.collectAsState()
     val audioHistory by repository.audioHistory.collectAsState()
     val sensitivity by repository.audioSensitivity.collectAsState()
+
+    var showMicDialog by remember { mutableStateOf(false) }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            AudioMonitoringService.start(context)
+        }
+    }
 
     // Pulsing waveform bars animation
     val infiniteTransition = rememberInfiniteTransition(label = "audio_bars")
@@ -318,7 +330,11 @@ fun MonitoringScreen(
                 if (isMonitoring) {
                     AudioMonitoringService.stop(context)
                 } else {
-                    AudioMonitoringService.start(context)
+                    if (PermissionHelper.hasAudioPermission(context)) {
+                        AudioMonitoringService.start(context)
+                    } else {
+                        showMicDialog = true
+                    }
                 }
             },
             modifier = Modifier
@@ -335,5 +351,35 @@ fun MonitoringScreen(
                 fontSize = 14.sp
             )
         }
+    }
+
+    if (showMicDialog) {
+        AlertDialog(
+            onDismissRequest = { showMicDialog = false },
+            title = { Text("Microphone Access Required", color = TextPrimary) },
+            text = {
+                Text(
+                    "SAFORA requires microphone permission to monitor ambient audio locally on your device for distress screams. Audio is never recorded to disk or sent to the cloud.",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showMicDialog = false
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
+                ) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMicDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 }

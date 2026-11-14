@@ -6,18 +6,20 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.ui.theme.CharcoalDark
 import com.example.safora.ui.theme.CrimsonEmergency
 import com.example.safora.ui.theme.TextSecondary
@@ -25,8 +27,13 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(
-    onTimeout: () -> Unit
+    onNavigateToDashboard: () -> Unit,
+    onNavigateToOnboarding: () -> Unit
 ) {
+    val context = LocalContext.current
+    val repository = SaforaRepository.getInstance(context)
+    val user by repository.user.collectAsState()
+
     val scale = rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 0.95f,
         targetValue = 1.05f,
@@ -39,7 +46,11 @@ fun SplashScreen(
 
     LaunchedEffect(Unit) {
         delay(1200)
-        onTimeout()
+        if (user.isOnboarded) {
+            onNavigateToDashboard()
+        } else {
+            onNavigateToOnboarding()
+        }
     }
 
     Box(

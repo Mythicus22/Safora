@@ -1,7 +1,8 @@
 package com.example.safora.features.dashboard
 
 import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,15 +23,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.safora.core.utils.PermissionHelper
 import com.example.safora.data.model.DeviceConnectionState
 import com.example.safora.data.model.IncidentState
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.services.audio.AudioMonitoringService
+import com.example.safora.services.location.SaforaLocationClient
 import com.example.safora.ui.components.LargeSosButton
 import com.example.safora.ui.components.StatusCard
 import com.example.safora.ui.theme.*
-import java.text.SimpleDateFormat
-import java.util.*
 
 @Composable
 fun DashboardScreen(
@@ -40,16 +41,36 @@ fun DashboardScreen(
     onNavigateToContacts: () -> Unit,
     onNavigateToMap: () -> Unit
 ) {
-    val repository = SaforaRepository.instance
     val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
 
     val user by repository.user.collectAsState()
     val wearable by repository.wearable.collectAsState()
     val incident by repository.currentIncident.collectAsState()
     val isMonitoring by repository.isAudioMonitoring.collectAsState()
     val location by repository.currentLocation.collectAsState()
+    val isRealGps by repository.isRealLocationLocked.collectAsState()
     val contacts by repository.contacts.collectAsState()
     val isDemoMode by repository.isDemoMode.collectAsState()
+
+    var showMicPermissionDialog by remember { mutableStateOf(false) }
+
+    // Launcher for on-demand audio recording permission
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            AudioMonitoringService.start(context)
+        }
+    }
+
+    // Auto-query live GPS on dashboard launch if permission granted
+    LaunchedEffect(Unit) {
+        if (PermissionHelper.hasLocationPermission(context)) {
+            val locationClient = SaforaLocationClient(context)
+            locationClient.requestCurrentLocation()
+        }
+    }
 
     // Auto navigate to emergency screen if incident enters verifying or active emergency
     LaunchedEffect(incident.state) {
@@ -104,7 +125,7 @@ fun DashboardScreen(
                     }
                 }
                 Text(
-                    text = "Welcome, ${user.name}",
+                    text = if (user.name.isNotBlank()) "Protected: ${user.name}" else "System Active",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -186,7 +207,7 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // SOS Button Section
+        // Large SOS Button Section
         LargeSosButton(
             isPulsing = true,
             onClick = {
@@ -204,7 +225,7 @@ fun DashboardScreen(
             letterSpacing = 0.5.sp
         )
         Text(
-            text = "Skips audio verification & triggers wearable recording immediately",
+            text = "Dispatches SMS to trusted contacts, starts camera & dials 112",
             color = TextTertiary,
             fontSize = 10.sp
         )
@@ -215,10 +236,10 @@ fun DashboardScreen(
         StatusCard(
             title = "WEARABLE NECKLACE (ESP32-CAM)",
             statusText = when (wearable.state) {
-                DeviceConnectionState.CONNECTED -> "${wearable.name} (${wearable.batteryLevel}% Battery - BLE Link)"
+                DeviceConnectionState.CONNECTED -> "${wearable.name} (${wearable.batteryLevel}% Battery - BLE Connected)"
                 DeviceConnectionState.CONNECTING -> "Connecting to ESP32 BLE GATT..."
                 DeviceConnectionState.SCANNING -> "Scanning for SAFORA BLE..."
-                DeviceConnectionState.DISCONNECTED -> "Wearable Not Connected"
+                DeviceConnectionState.DISCONNECTED -> "Wearable Standby / Disconnected"
             },
             isActive = wearable.state == DeviceConnectionState.CONNECTED,
             actionText = if (wearable.state == DeviceConnectionState.CONNECTED) "MANAGE" else "CONNECT",
@@ -237,7 +258,11 @@ fun DashboardScreen(
                 if (isMonitoring) {
                     onNavigateToMonitoring()
                 } else {
-                    AudioMonitoringService.start(context)
+                    if (PermissionHelper.hasAudioPermission(context)) {
+                        AudioMonitoringService.start(context)
+                    } else {
+                        showMicPermissionDialog = true
+                    }
                 }
             }
         )
@@ -246,16 +271,16 @@ fun DashboardScreen(
 
         // Location & Responder Status Card
         StatusCard(
-            title = "GPS LOCATION & RESPONDERS",
+            title = if (isRealGps) "LIVE PHONE GPS LOCATION" else "GPS LOCATION (ESTIMATED)",
             statusText = "${"%.4f".format(location.first)}, ${"%.4f".format(location.second)} • 3 Responders Nearby",
-            isActive = true,
+            isActive = isRealGps,
             actionText = "VIEW MAP",
             onActionClick = onNavigateToMap
         )
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Recent Incident Summary Card
+        // Safety Contacts Summary
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
@@ -268,34 +293,34 @@ fun DashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "SAFETY SUMMARY",
+                        text = "TRUSTED EMERGENCY NETWORK",
                         color = TextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
+                    TextButton(onClick = onNavigateToContacts) {
+                        Text("Manage", color = BluePrimary, fontSize = 11.sp)
+                    }
+                }
+                if (contacts.isEmpty()) {
                     Text(
-                        text = if (incident.id.isNotEmpty()) "Last Incident: ${incident.id}" else "All Systems Normal",
-                        color = if (incident.state == IncidentState.CONFIRMED_SOS) CrimsonEmergency else EmeraldSafe,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "No emergency contacts added yet. Tap Manage to import from your phonebook.",
+                        color = AmberWarning,
+                        fontSize = 11.sp
+                    )
+                } else {
+                    Text(
+                        text = "${contacts.count { it.isEmergencyContact }} Emergency contacts ready to receive cellular SOS alerts.",
+                        color = TextPrimary,
+                        fontSize = 11.sp
                     )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = if (incident.id.isNotEmpty()) {
-                        "State: ${incident.state.name} • Trigger: ${incident.triggerSource}"
-                    } else {
-                        "No emergency incidents recorded. 3 trusted contacts active."
-                    },
-                    color = TextPrimary,
-                    fontSize = 12.sp
-                )
             }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Demo Simulation Box for Live Hackathon Testing
+        // Demo Simulation Box for Hackathon Presentation
         if (isDemoMode) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -348,5 +373,36 @@ fun DashboardScreen(
         }
 
         Spacer(modifier = Modifier.height(90.dp))
+    }
+
+    // On-Demand Mic Permission Dialog
+    if (showMicPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showMicPermissionDialog = false },
+            title = { Text("Microphone Access Required", color = TextPrimary) },
+            text = {
+                Text(
+                    "SAFORA runs a local acoustic model on-device to classify distress screams in real-time. Audio is analyzed locally and never uploaded to the cloud.",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showMicPermissionDialog = false
+                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
+                ) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMicPermissionDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 }

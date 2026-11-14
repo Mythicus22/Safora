@@ -1,12 +1,15 @@
 package com.example.safora.features.device
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -15,26 +18,41 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.safora.core.utils.PermissionHelper
 import com.example.safora.data.model.DeviceConnectionState
 import com.example.safora.data.model.DiscoveredBleDevice
 import com.example.safora.data.repository.SaforaRepository
+import com.example.safora.services.ble.BleManager
 import com.example.safora.ui.theme.*
 
 @Composable
 fun DevicePairingScreen(
     onBack: () -> Unit
 ) {
-    val repository = SaforaRepository.instance
+    val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val wearable by repository.wearable.collectAsState()
     val discoveredDevices by repository.discoveredDevices.collectAsState()
 
+    val bleManager = remember { BleManager(context) }
     var showConsoleLogs by remember { mutableStateOf(false) }
+    var showBlePermissionDialog by remember { mutableStateOf(false) }
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results.values.all { it }
+        if (granted) {
+            bleManager.startScan()
+            repository.startBleScan()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -154,7 +172,10 @@ fun DevicePairingScreen(
                 ) {
                     if (wearable.state == DeviceConnectionState.CONNECTED) {
                         Button(
-                            onClick = { repository.disconnectWearable() },
+                            onClick = {
+                                bleManager.disconnect()
+                                repository.disconnectWearable()
+                            },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = CrimsonEmergencyDark),
                             shape = RoundedCornerShape(10.dp)
@@ -165,9 +186,15 @@ fun DevicePairingScreen(
                         Button(
                             onClick = {
                                 if (wearable.state == DeviceConnectionState.SCANNING) {
+                                    bleManager.stopScan()
                                     repository.stopBleScan()
                                 } else {
-                                    repository.startBleScan()
+                                    if (PermissionHelper.hasBlePermission(context)) {
+                                        bleManager.startScan()
+                                        repository.startBleScan()
+                                    } else {
+                                        showBlePermissionDialog = true
+                                    }
                                 }
                             },
                             modifier = Modifier.weight(1f),
@@ -180,7 +207,9 @@ fun DevicePairingScreen(
 
                     OutlinedButton(
                         onClick = {
-                            repository.setWearableRecording(!wearable.isRecording)
+                            val nextRec = !wearable.isRecording
+                            repository.setWearableRecording(nextRec)
+                            bleManager.sendCommand(if (nextRec) "START_RECORD" else "STOP_RECORD")
                         },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
@@ -352,5 +381,40 @@ fun DevicePairingScreen(
             Spacer(modifier = Modifier.width(8.dp))
             Text("Simulate Wearable Necklace Physical Button Press", color = Color.Black, fontWeight = FontWeight.Bold)
         }
+    }
+
+    if (showBlePermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlePermissionDialog = false },
+            title = { Text("Bluetooth Permission Required", color = TextPrimary) },
+            text = {
+                Text(
+                    "SAFORA needs Bluetooth permissions to detect, pair, and send recording commands to your wearable necklace.",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBlePermissionDialog = false
+                        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+                        } else {
+                            arrayOf(Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN)
+                        }
+                        blePermissionLauncher.launch(perms)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BluePrimary)
+                ) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlePermissionDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = CharcoalSurfaceElevated
+        )
     }
 }

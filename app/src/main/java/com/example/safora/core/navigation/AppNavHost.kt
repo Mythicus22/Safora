@@ -89,8 +89,13 @@ fun AppNavHost() {
         ) {
             composable(Screen.Splash.route) {
                 SplashScreen(
-                    onTimeout = {
+                    onNavigateToDashboard = {
                         navController.navigate(Screen.Dashboard.route) {
+                            popUpTo(Screen.Splash.route) { inclusive = true }
+                        }
+                    },
+                    onNavigateToOnboarding = {
+                        navController.navigate(Screen.Onboarding.route) {
                             popUpTo(Screen.Splash.route) { inclusive = true }
                         }
                     }

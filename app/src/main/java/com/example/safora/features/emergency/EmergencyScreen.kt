@@ -34,8 +34,8 @@ fun EmergencyScreen(
     onDismissToDashboard: () -> Unit,
     onNavigateToEvidence: () -> Unit
 ) {
-    val repository = SaforaRepository.instance
     val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val incident by repository.currentIncident.collectAsState()
     val wearable by repository.wearable.collectAsState()
     val contacts by repository.contacts.collectAsState()
@@ -60,7 +60,7 @@ fun EmergencyScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (incident.state == IncidentState.VERIFYING) CharcoalDark else CharcoalDark)
+            .background(CharcoalDark)
             .padding(20.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -138,7 +138,7 @@ fun EmergencyScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = "Auto-triggering SOS & wearable camera in $countdownSeconds s",
+                        text = "Auto-triggering cellular SOS alerts & ESP32 cam in $countdownSeconds s",
                         color = TextTertiary,
                         fontSize = 11.sp
                     )
@@ -221,7 +221,7 @@ fun EmergencyScreen(
                         type = "text/plain"
                         putExtra(
                             Intent.EXTRA_TEXT,
-                            "EMERGENCY! I need immediate help. My current SAFORA GPS location is: https://maps.google.com/?q=${location.first},${location.second} (Incident ID: ${incident.id})"
+                            "EMERGENCY ALERT! I need immediate help. My current GPS location is: https://maps.google.com/?q=${location.first},${location.second} (Incident ID: ${incident.id})"
                         )
                     }
                     context.startActivity(Intent.createChooser(shareIntent, "Share Emergency Location"))
@@ -231,7 +231,7 @@ fun EmergencyScreen(
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, tint = BluePrimary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Share Live GPS & Incident Link via SMS / WhatsApp", color = BluePrimary, fontSize = 12.sp)
+                Text("Share Emergency SMS / WhatsApp Broadcast", color = BluePrimary, fontSize = 12.sp)
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -255,9 +255,9 @@ fun EmergencyScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("GPS Location", color = TextSecondary, fontSize = 12.sp)
+                        Text("Live GPS Location", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            "${"%.4f".format(location.first)}, ${"%.4f".format(location.second)} (Accuracy: 5m)",
+                            "${"%.5f".format(location.first)}, ${"%.5f".format(location.second)}",
                             color = TextPrimary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
@@ -283,9 +283,9 @@ fun EmergencyScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Emergency Contacts Alerted", color = TextSecondary, fontSize = 12.sp)
+                        Text("Cellular SMS Alerts", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            "${contacts.count { it.isEmergencyContact }} Contacts (${contacts.filter { it.isEmergencyContact }.joinToString { it.name.split(" ")[0] }})",
+                            "${contacts.count { it.isEmergencyContact }} Direct SMS Sent",
                             color = EmeraldSafe,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp

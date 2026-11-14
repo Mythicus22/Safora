@@ -1,6 +1,10 @@
 package com.example.safora.features.settings
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,9 +16,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.safora.core.utils.PermissionHelper
 import com.example.safora.data.model.User
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.ui.theme.*
@@ -24,15 +30,22 @@ fun SettingsScreen(
     onNavigateToPairing: () -> Unit,
     onNavigateToContacts: () -> Unit
 ) {
-    val repository = SaforaRepository.instance
+    val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val user by repository.user.collectAsState()
     val isDemoMode by repository.isDemoMode.collectAsState()
-    val isMonitoring by repository.isAudioMonitoring.collectAsState()
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(user.name) }
     var editPhone by remember { mutableStateOf(user.phone) }
     var editBlood by remember { mutableStateOf(user.bloodGroup) }
+
+    // Check actual Android runtime permissions
+    val hasLocation = PermissionHelper.hasLocationPermission(context)
+    val hasAudio = PermissionHelper.hasAudioPermission(context)
+    val hasBle = PermissionHelper.hasBlePermission(context)
+    val hasContacts = PermissionHelper.hasContactsPermission(context)
+    val hasNotifications = PermissionHelper.hasNotificationPermission(context)
 
     Column(
         modifier = Modifier
@@ -44,13 +57,13 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "PROFILE & PREFERENCES",
+            text = "PROFILE & SETTINGS",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Black,
             color = Color.White
         )
         Text(
-            text = "System settings, safety triggers and hardware management",
+            text = "System permissions, wearable link and emergency identity",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
@@ -71,13 +84,13 @@ fun SettingsScreen(
                 ) {
                     Column {
                         Text(
-                            text = user.name,
+                            text = user.name.ifBlank { "User Profile" },
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                             color = TextPrimary
                         )
                         Text(
-                            text = "${user.phone} • Blood: ${user.bloodGroup}",
+                            text = "${user.phone.ifBlank { "No Phone Set" }} • Blood: ${user.bloodGroup}",
                             color = TextSecondary,
                             fontSize = 12.sp
                         )
@@ -95,16 +108,62 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // Device & Safety Controls
+        // Android System Permissions Section
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "ANDROID SYSTEM PERMISSIONS",
+                color = TextSecondary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+            TextButton(
+                onClick = {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                    }
+                    context.startActivity(intent)
+                }
+            ) {
+                Text("Open App Settings", color = CyanAccent, fontSize = 11.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                PermissionStatusRow("GPS Location (FusedLocation)", hasLocation)
+                HorizontalDivider(color = CharcoalBorder, modifier = Modifier.padding(vertical = 8.dp))
+                PermissionStatusRow("Microphone (Acoustic Shield)", hasAudio)
+                HorizontalDivider(color = CharcoalBorder, modifier = Modifier.padding(vertical = 8.dp))
+                PermissionStatusRow("Bluetooth LE (Wearable Link)", hasBle)
+                HorizontalDivider(color = CharcoalBorder, modifier = Modifier.padding(vertical = 8.dp))
+                PermissionStatusRow("Read Contacts (Address Book)", hasContacts)
+                HorizontalDivider(color = CharcoalBorder, modifier = Modifier.padding(vertical = 8.dp))
+                PermissionStatusRow("Push Notifications", hasNotifications)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Safety Management Shortcuts
         Text(
             text = "SAFETY SHORTCUTS",
             color = TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -114,7 +173,7 @@ fun SettingsScreen(
             Column {
                 ListItem(
                     headlineContent = { Text("Wearable Pairing & BLE", color = TextPrimary) },
-                    supportingContent = { Text("Manage ESP32 necklace link & GATT logs", color = TextSecondary) },
+                    supportingContent = { Text("ESP32-CAM necklace link & live GATT terminal", color = TextSecondary) },
                     trailingContent = {
                         IconButton(onClick = onNavigateToPairing) {
                             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextSecondary)
@@ -125,7 +184,7 @@ fun SettingsScreen(
                 HorizontalDivider(color = CharcoalBorder)
                 ListItem(
                     headlineContent = { Text("Emergency Contacts", color = TextPrimary) },
-                    supportingContent = { Text("Recipients for SOS broadcast alerts", color = TextSecondary) },
+                    supportingContent = { Text("Configure recipients for SOS alerts & live GPS", color = TextSecondary) },
                     trailingContent = {
                         IconButton(onClick = onNavigateToContacts) {
                             Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextSecondary)
@@ -136,7 +195,7 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         // Demo Mode Switch
         Card(
@@ -167,12 +226,12 @@ fun SettingsScreen(
         // Reset Demo Data
         OutlinedButton(
             onClick = {
-                repository.updateUser(User())
+                repository.updateUser(User(name = "", phone = "", isOnboarded = false))
             },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(10.dp)
         ) {
-            Text("Reset Demo Data to Initial State", color = TextTertiary)
+            Text("Reset Demo Profile to Default", color = TextTertiary)
         }
 
         Spacer(modifier = Modifier.height(90.dp))
@@ -213,7 +272,8 @@ fun SettingsScreen(
                             user.copy(
                                 name = editName,
                                 phone = editPhone,
-                                bloodGroup = editBlood
+                                bloodGroup = editBlood,
+                                isOnboarded = true
                             )
                         )
                         showEditProfileDialog = false
@@ -231,3 +291,27 @@ fun SettingsScreen(
         )
     }
 }
+
+@Composable
+fun PermissionStatusRow(permissionName: String, isGranted: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = permissionName, color = TextPrimary, fontSize = 12.sp)
+        Surface(
+            color = if (isGranted) EmeraldSafe.copy(alpha = 0.2f) else CrimsonEmergency.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(4.dp)
+        ) {
+            Text(
+                text = if (isGranted) "GRANTED" else "REQUIRED",
+                color = if (isGranted) EmeraldSafe else CrimsonEmergency,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+    }
+}
+

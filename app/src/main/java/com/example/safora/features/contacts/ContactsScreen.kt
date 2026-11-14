@@ -2,6 +2,8 @@ package com.example.safora.features.contacts
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.safora.core.utils.ContactPickerHelper
 import com.example.safora.data.model.Contact
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.ui.theme.*
@@ -34,10 +37,20 @@ fun ContactsScreen(
     val context = LocalContext.current
     val contacts by repository.contacts.collectAsState()
 
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showManualAddDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var newPhone by remember { mutableStateOf("") }
     var newRelation by remember { mutableStateOf("Family") }
+
+    // Native Android Contact Picker
+    val pickContactLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact()
+    ) { contactUri ->
+        contactUri?.let { uri ->
+            val contact = ContactPickerHelper.resolveContactFromUri(context, uri)
+            contact?.let { repository.addContact(it) }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -68,20 +81,72 @@ fun ContactsScreen(
                 )
             }
 
-            IconButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Add Contact", tint = BluePrimary)
+            Row {
+                IconButton(onClick = { pickContactLauncher.launch(null) }) {
+                    Icon(Icons.Default.PermContactCalendar, contentDescription = "Pick Phone Contact", tint = CyanAccent)
+                }
+                IconButton(onClick = { showManualAddDialog = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Manual Add", tint = BluePrimary)
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Quick Import Button Banner
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { pickContactLauncher.launch(null) },
+            colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Contacts,
+                        contentDescription = null,
+                        tint = CyanAccent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Import from Android Phonebook",
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            text = "Select trusted friends & family directly from your device",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = TextTertiary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "During an SOS trigger, live GPS location and alerts are automatically sent to configured Emergency Contacts.",
+            text = "During an SOS event, these contacts receive immediate SMS alerts with your live GPS link.",
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -134,7 +199,7 @@ fun ContactsScreen(
                                             shape = RoundedCornerShape(4.dp)
                                         ) {
                                             Text(
-                                                text = "SOS RECIPIENT",
+                                                text = "SOS",
                                                 color = CrimsonEmergency,
                                                 fontSize = 8.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -152,7 +217,7 @@ fun ContactsScreen(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Test Call Button
+                            // Direct Phone Call
                             IconButton(
                                 onClick = {
                                     val intent = Intent(Intent.ACTION_DIAL).apply {
@@ -174,7 +239,7 @@ fun ContactsScreen(
                                 )
                             }
 
-                            // Remove
+                            // Delete Contact
                             IconButton(onClick = { repository.removeContact(contact.id) }) {
                                 Icon(
                                     Icons.Default.DeleteOutline,
@@ -190,16 +255,16 @@ fun ContactsScreen(
         }
     }
 
-    if (showAddDialog) {
+    if (showManualAddDialog) {
         AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("Add Trusted Contact", color = TextPrimary) },
+            onDismissRequest = { showManualAddDialog = false },
+            title = { Text("Add Contact Manually", color = TextPrimary) },
             text = {
                 Column {
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text("Contact Name") },
+                        label = { Text("Full Name") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -213,7 +278,7 @@ fun ContactsScreen(
                     OutlinedTextField(
                         value = newRelation,
                         onValueChange = { newRelation = it },
-                        label = { Text("Relationship (e.g. Sibling, Friend)") },
+                        label = { Text("Relationship") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -233,15 +298,15 @@ fun ContactsScreen(
                             )
                             newName = ""
                             newPhone = ""
-                            showAddDialog = false
+                            showManualAddDialog = false
                         }
                     }
                 ) {
-                    Text("Save Contact")
+                    Text("Add")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
+                TextButton(onClick = { showManualAddDialog = false }) {
                     Text("Cancel")
                 }
             },

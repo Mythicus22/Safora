@@ -1,8 +1,9 @@
 package com.example.safora.features.map
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,25 +20,63 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.safora.core.utils.PermissionHelper
 import com.example.safora.data.model.IncidentState
 import com.example.safora.data.model.Responder
 import com.example.safora.data.repository.SaforaRepository
+import com.example.safora.services.location.SaforaLocationClient
 import com.example.safora.ui.theme.*
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon
+import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
 @Composable
 fun MapScreen() {
-    val repository = SaforaRepository.instance
     val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val location by repository.currentLocation.collectAsState()
+    val isRealGps by repository.isRealLocationLocked.collectAsState()
     val responders by repository.responders.collectAsState()
     val incident by repository.currentIncident.collectAsState()
 
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var selectedResponder by remember { mutableStateOf<Responder?>(null) }
+    var hasLocationPermission by remember { mutableStateOf(PermissionHelper.hasLocationPermission(context)) }
+
+    // On-demand location permission requester
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results.values.any { it }
+        hasLocationPermission = granted
+        if (granted) {
+            val locationClient = SaforaLocationClient(context)
+            locationClient.requestCurrentLocation { loc ->
+                mapViewRef?.controller?.animateTo(GeoPoint(loc.latitude, loc.longitude))
+            }
+            locationClient.startLocationUpdates()
+        }
+    }
+
+    // Auto-request GPS & start updates if permission granted
+    DisposableEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            val locationClient = SaforaLocationClient(context)
+            locationClient.requestCurrentLocation { loc ->
+                mapViewRef?.controller?.animateTo(GeoPoint(loc.latitude, loc.longitude))
+            }
+            locationClient.startLocationUpdates()
+            onDispose {
+                locationClient.stopLocationUpdates()
+            }
+        } else {
+            onDispose { }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // OpenStreetMap Android View
@@ -46,28 +85,53 @@ fun MapScreen() {
                 MapView(ctx).apply {
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
-                    controller.setZoom(16.5)
+                    controller.setZoom(17.0)
                     controller.setCenter(GeoPoint(location.first, location.second))
+
+                    // Built-in location overlay for real blue pulsing GPS dot
+                    if (PermissionHelper.hasLocationPermission(ctx)) {
+                        val locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), this)
+                        locationOverlay.enableMyLocation()
+                        locationOverlay.enableFollowLocation()
+                        overlays.add(locationOverlay)
+                    }
+
                     mapViewRef = this
                 }
             },
             update = { mapView ->
+                // Clear dynamic markers except MyLocationNewOverlay
+                val myLocOverlay = mapView.overlays.firstOrNull { it is MyLocationNewOverlay }
                 mapView.overlays.clear()
+                myLocOverlay?.let { mapView.overlays.add(it) }
 
-                // User Location Marker
                 val userGeo = GeoPoint(location.first, location.second)
+
+                // User Location Pin
                 val userMarker = Marker(mapView).apply {
                     position = userGeo
-                    title = "You (SAFORA GPS Active)"
+                    title = if (isRealGps) "YOUR LIVE LOCATION (GPS LOCKED)" else "CURRENT POSITION"
+                    snippet = "Lat: ${"%.5f".format(location.first)}, Lng: ${"%.5f".format(location.second)}"
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 }
                 mapView.overlays.add(userMarker)
+
+                // Add Safety Perimeter Circle around user (150m accuracy ring)
+                val circle = Polygon.pointsAsCircle(userGeo, 120.0)
+                val accuracyCircle = Polygon(mapView).apply {
+                    points = circle
+                    fillPaint.color = android.graphics.Color.argb(35, 37, 99, 235)
+                    outlinePaint.color = android.graphics.Color.argb(120, 37, 99, 235)
+                    outlinePaint.strokeWidth = 2f
+                }
+                mapView.overlays.add(accuracyCircle)
 
                 // Responder Markers
                 responders.forEach { responder ->
                     val respMarker = Marker(mapView).apply {
                         position = GeoPoint(responder.latitude, responder.longitude)
-                        title = "${responder.name} • ${responder.distanceMeters}m"
+                        title = "${responder.name} (${responder.distanceMeters}m)"
+                        snippet = "${responder.role} • ETA ${responder.etaMinutes} min"
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         setOnMarkerClickListener { _, _ ->
                             selectedResponder = responder
@@ -82,7 +146,7 @@ fun MapScreen() {
             modifier = Modifier.fillMaxSize()
         )
 
-        // Floating Top Header Card
+        // Top Status Header Card
         Card(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -99,45 +163,103 @@ fun MapScreen() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isRealGps) EmeraldSafe else AmberWarning)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isRealGps) "LIVE PHONE GPS LOCKED" else "ACQUIRING GPS FIX...",
+                            color = if (isRealGps) EmeraldSafe else AmberWarning,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(
-                        text = "SAFETY PATROL NETWORK",
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${responders.count { it.isAvailable }} Responders Within 1km",
-                        color = EmeraldSafe,
+                        text = "${"%.5f".format(location.first)}, ${"%.5f".format(location.second)}",
+                        color = TextPrimary,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 13.sp
                     )
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
-                        onClick = {
-                            mapViewRef?.controller?.zoomIn()
-                        }
+                        onClick = { mapViewRef?.controller?.zoomIn() }
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = TextPrimary)
                     }
                     IconButton(
-                        onClick = {
-                            mapViewRef?.controller?.zoomOut()
-                        }
+                        onClick = { mapViewRef?.controller?.zoomOut() }
                     ) {
                         Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = TextPrimary)
                     }
                     IconButton(
                         onClick = {
-                            mapViewRef?.controller?.animateTo(GeoPoint(location.first, location.second))
+                            if (!hasLocationPermission) {
+                                locationPermissionLauncher.launch(
+                                    arrayOf(
+                                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            } else {
+                                val locationClient = SaforaLocationClient(context)
+                                locationClient.requestCurrentLocation { loc ->
+                                    mapViewRef?.controller?.animateTo(GeoPoint(loc.latitude, loc.longitude))
+                                }
+                            }
                         }
                     ) {
                         Icon(
                             imageVector = Icons.Default.MyLocation,
                             contentDescription = "Center on me",
-                            tint = BluePrimary
+                            tint = if (isRealGps) BluePrimary else AmberWarning
                         )
+                    }
+                }
+            }
+        }
+
+        // Permission Request Warning Banner if user rejected location
+        if (!hasLocationPermission) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 90.dp, start = 16.dp, end = 16.dp)
+                    .fillMaxWidth(),
+                color = AmberWarning.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Precise location disabled. Enable GPS for emergency tracking.",
+                        color = Color.Black,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = {
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                )
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Black),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("Enable", color = Color.White, fontSize = 11.sp)
                     }
                 }
             }
@@ -166,7 +288,7 @@ fun MapScreen() {
                             fontSize = 12.sp
                         )
                         Text(
-                            text = "Broadcasting GPS to ${responders.size} nearby community responders",
+                            text = "Broadcasting live GPS to ${responders.size} nearby community responders",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 11.sp
                         )

@@ -8,14 +8,14 @@ import com.example.safora.data.repository.SaforaRepository
 import com.google.android.gms.location.*
 
 class SaforaLocationClient(private val context: Context) {
-    private val repository = SaforaRepository.instance
+    private val repository = SaforaRepository.getInstance(context)
     private val fusedLocationClient: FusedLocationProviderClient =
         LocationServices.getFusedLocationProviderClient(context)
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             result.lastLocation?.let { location ->
-                repository.updateLocation(location.latitude, location.longitude)
+                repository.updateLocation(location.latitude, location.longitude, isRealGps = true)
             }
         }
     }
@@ -23,12 +23,25 @@ class SaforaLocationClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun requestCurrentLocation(onLocationReceived: ((Location) -> Unit)? = null) {
         try {
-            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-                if (loc != null) {
-                    repository.updateLocation(loc.latitude, loc.longitude)
-                    onLocationReceived?.invoke(loc)
+            // First try high accuracy current location
+            val priority = Priority.PRIORITY_HIGH_ACCURACY
+            val cancellationTokenSource = com.google.android.gms.tasks.CancellationTokenSource()
+
+            fusedLocationClient.getCurrentLocation(priority, cancellationTokenSource.token)
+                .addOnSuccessListener { loc ->
+                    if (loc != null) {
+                        repository.updateLocation(loc.latitude, loc.longitude, isRealGps = true)
+                        onLocationReceived?.invoke(loc)
+                    } else {
+                        // Fallback to lastLocation if current is null
+                        fusedLocationClient.lastLocation.addOnSuccessListener { fallbackLoc ->
+                            fallbackLoc?.let {
+                                repository.updateLocation(it.latitude, it.longitude, isRealGps = true)
+                                onLocationReceived?.invoke(it)
+                            }
+                        }
+                    }
                 }
-            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -36,8 +49,9 @@ class SaforaLocationClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-            .setMinUpdateIntervalMillis(3000)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4000)
+            .setMinUpdateIntervalMillis(2000)
+            .setWaitForAccurateLocation(true)
             .build()
 
         try {
