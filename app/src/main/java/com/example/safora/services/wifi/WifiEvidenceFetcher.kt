@@ -72,7 +72,10 @@ class WifiEvidenceFetcher(
         val url = "http://$host:80/evidence?segment=$segmentIndex"
 
         val client = softApManager.createBoundHttpClient()
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer safora_auth_token_2026")
+            .build()
 
         try {
             client.newCall(request).execute().use { response ->

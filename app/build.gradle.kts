@@ -35,6 +35,14 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        noCompress += listOf("tflite")
+    }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -54,6 +62,9 @@ dependencies {
     implementation(libs.osmdroid.android)
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

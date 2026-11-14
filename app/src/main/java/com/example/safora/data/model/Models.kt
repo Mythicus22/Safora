@@ -107,5 +107,60 @@ data class Responder(
 data class AudioDetectionResult(
     val detectedClass: String,
     val confidence: Float,
-    val timestamp: Long
+    val timestamp: Long,
+    val riskLevel: RiskLevel = RiskLevel.LOW,
+    val details: String = ""
+)
+
+enum class RiskLevel {
+    LOW,
+    MEDIUM,
+    HIGH
+}
+
+data class YamnetInferenceResult(
+    val dominantClass: String,
+    val dominantConfidence: Float,
+    val screamConfidence: Float,
+    val isDistressAcoustic: Boolean,
+    val inferenceTimeMs: Long,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class SpeechTranscriptResult(
+    val text: String,
+    val isFinal: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class SafetyClassificationResult(
+    val label: String,             // "BENIGN" or "HARMFUL"
+    val score: Float,             // Raw probability / confidence
+    val threshold: Float = 0.05f, // Baseline threshold from safora_metadata.json
+    val isHarmful: Boolean,
+    val isLocalFallback: Boolean = false,
+    val latencyMs: Long = 0L,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class RiskDecisionResult(
+    val riskLevel: RiskLevel,
+    val compositeScore: Float,
+    val reason: String,
+    val yamnetScore: Float,
+    val conversationScore: Float,
+    val timestamp: Long = System.currentTimeMillis(),
+    val triggeredEmergency: Boolean = false
+)
+
+data class AudioPipelineDiagnostics(
+    val isAudioCaptureActive: Boolean = false,
+    val isVadActive: Boolean = false,
+    val currentRmsDbfs: Float = -90.0f,
+    val yamnetDistressScore: Float = 0.0f,
+    val speechTranscriptContext: String = "",
+    val textSafetyScore: Float = 0.0f,
+    val currentRiskLevel: RiskLevel = RiskLevel.LOW,
+    val totalInferences: Long = 0L,
+    val lastInferenceLatencyMs: Long = 0L
 )

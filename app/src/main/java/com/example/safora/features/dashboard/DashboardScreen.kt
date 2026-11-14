@@ -39,10 +39,12 @@ fun DashboardScreen(
     onNavigateToMonitoring: () -> Unit,
     onNavigateToEmergency: () -> Unit,
     onNavigateToContacts: () -> Unit,
-    onNavigateToMap: () -> Unit
+    onNavigateToMap: () -> Unit,
+    onNavigateToProfile: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val repository = remember { SaforaRepository.getInstance(context) }
+    val modelManager = remember { com.example.safora.services.audio.model.ModelDownloadManager.getInstance(context) }
 
     val user by repository.user.collectAsState()
     val wearable by repository.wearable.collectAsState()
@@ -52,6 +54,7 @@ fun DashboardScreen(
     val isRealGps by repository.isRealLocationLocked.collectAsState()
     val contacts by repository.contacts.collectAsState()
     val isDemoMode by repository.isDemoMode.collectAsState()
+    val areAllModelsDownloaded by modelManager.areAllModelsDownloaded.collectAsState()
 
     var showMicPermissionDialog by remember { mutableStateOf(false) }
 
@@ -64,11 +67,14 @@ fun DashboardScreen(
         }
     }
 
-    // Auto-query live GPS on dashboard launch if permission granted
+    // Auto-query live GPS on dashboard launch and auto-start mic monitoring if models are ready
     LaunchedEffect(Unit) {
         if (PermissionHelper.hasLocationPermission(context)) {
             val locationClient = SaforaLocationClient(context)
             locationClient.requestCurrentLocation()
+        }
+        if (modelManager.areAllDownloaded() && PermissionHelper.hasAudioPermission(context)) {
+            AudioMonitoringService.start(context)
         }
     }
 
@@ -153,6 +159,51 @@ fun DashboardScreen(
                         color = TextPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        if (!areAllModelsDownloaded) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToProfile() },
+                colors = CardDefaults.cardColors(containerColor = AmberWarning.copy(alpha = 0.15f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AmberWarning.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Warning",
+                        tint = AmberWarning,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Safety AI Models Missing",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = AmberWarning
+                        )
+                        Text(
+                            text = "Offline scream & threat shield disabled. Tap to download in Profile.",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Go",
+                        tint = AmberWarning
                     )
                 }
             }

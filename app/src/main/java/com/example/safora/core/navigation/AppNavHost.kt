@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,7 +24,7 @@ import com.example.safora.features.splash.SplashScreen
 import com.example.safora.ui.theme.*
 
 @Composable
-fun AppNavHost() {
+fun AppNavHost(initialNavigateToProfile: Boolean = false) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -36,6 +37,18 @@ fun AppNavHost() {
     )
 
     val showBottomBar = currentRoute in bottomTabs.map { it.route }
+
+    LaunchedEffect(initialNavigateToProfile) {
+        if (initialNavigateToProfile) {
+            navController.navigate(Screen.Settings.route) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -90,7 +103,8 @@ fun AppNavHost() {
             composable(Screen.Splash.route) {
                 SplashScreen(
                     onNavigateToDashboard = {
-                        navController.navigate(Screen.Dashboard.route) {
+                        val destination = if (initialNavigateToProfile) Screen.Settings.route else Screen.Dashboard.route
+                        navController.navigate(destination) {
                             popUpTo(Screen.Splash.route) { inclusive = true }
                         }
                     },
@@ -116,7 +130,8 @@ fun AppNavHost() {
                     onNavigateToMonitoring = { navController.navigate(Screen.Monitoring.route) },
                     onNavigateToEmergency = { navController.navigate(Screen.Emergency.route) },
                     onNavigateToContacts = { navController.navigate(Screen.Contacts.route) },
-                    onNavigateToMap = { navController.navigate(Screen.Map.route) }
+                    onNavigateToMap = { navController.navigate(Screen.Map.route) },
+                    onNavigateToProfile = { navController.navigate(Screen.Settings.route) }
                 )
             }
             composable(Screen.DevicePairing.route) {

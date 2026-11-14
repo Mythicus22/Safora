@@ -199,20 +199,48 @@ fun MonitoringScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = lastDetection.detectedClass,
-                        color = if (lastDetection.detectedClass.contains("Scream")) CrimsonEmergency else EmeraldSafe,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        text = "${(lastDetection.confidence * 100).toInt()}% Confidence",
-                        color = TextPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = lastDetection.detectedClass,
+                            color = when (lastDetection.riskLevel) {
+                                com.example.safora.data.model.RiskLevel.HIGH -> CrimsonEmergency
+                                com.example.safora.data.model.RiskLevel.MEDIUM -> AmberWarning
+                                com.example.safora.data.model.RiskLevel.LOW -> EmeraldSafe
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        if (lastDetection.details.isNotBlank()) {
+                            Text(
+                                text = lastDetection.details,
+                                color = TextTertiary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Surface(
+                        color = when (lastDetection.riskLevel) {
+                            com.example.safora.data.model.RiskLevel.HIGH -> CrimsonEmergency.copy(alpha = 0.2f)
+                            com.example.safora.data.model.RiskLevel.MEDIUM -> AmberWarning.copy(alpha = 0.2f)
+                            com.example.safora.data.model.RiskLevel.LOW -> EmeraldSafe.copy(alpha = 0.2f)
+                        },
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = "${lastDetection.riskLevel} RISK",
+                            color = when (lastDetection.riskLevel) {
+                                com.example.safora.data.model.RiskLevel.HIGH -> CrimsonEmergency
+                                com.example.safora.data.model.RiskLevel.MEDIUM -> AmberWarning
+                                com.example.safora.data.model.RiskLevel.LOW -> EmeraldSafe
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 LinearProgressIndicator(
@@ -221,7 +249,11 @@ fun MonitoringScreen(
                         .fillMaxWidth()
                         .height(6.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = if (lastDetection.detectedClass.contains("Scream")) CrimsonEmergency else EmeraldSafe,
+                    color = when (lastDetection.riskLevel) {
+                        com.example.safora.data.model.RiskLevel.HIGH -> CrimsonEmergency
+                        com.example.safora.data.model.RiskLevel.MEDIUM -> AmberWarning
+                        com.example.safora.data.model.RiskLevel.LOW -> EmeraldSafe
+                    },
                     trackColor = CharcoalBorder
                 )
             }
@@ -246,9 +278,15 @@ fun MonitoringScreen(
             OutlinedButton(
                 onClick = {
                     repository.updateAudioDetection(
-                        AudioDetectionResult("Scream / Distress Call", 0.96f, System.currentTimeMillis())
+                        AudioDetectionResult(
+                            detectedClass = "Scream / Severe Acoustic Distress",
+                            confidence = 0.96f,
+                            timestamp = System.currentTimeMillis(),
+                            riskLevel = com.example.safora.data.model.RiskLevel.HIGH,
+                            details = "Fast-track scream escalation (>72%)"
+                        )
                     )
-                    repository.triggerPossibleDistress("Scream / Distress Call")
+                    repository.confirmSos("AI_ACOUSTIC_SCREAM")
                 },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp)
@@ -259,7 +297,37 @@ fun MonitoringScreen(
             OutlinedButton(
                 onClick = {
                     repository.updateAudioDetection(
-                        AudioDetectionResult("Normal Speech / Ambient", 0.98f, System.currentTimeMillis())
+                        AudioDetectionResult(
+                            detectedClass = "Model 4 Harmful Threat Context",
+                            confidence = 0.88f,
+                            timestamp = System.currentTimeMillis(),
+                            riskLevel = com.example.safora.data.model.RiskLevel.HIGH,
+                            details = "\"Get in the car, don't scream\" (Score: 88% > 5%)"
+                        )
+                    )
+                    repository.confirmSos("AI_CONVERSATION_CLASSIFIER")
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Threat (88%)", fontSize = 11.sp, color = AmberWarning)
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    repository.updateAudioDetection(
+                        AudioDetectionResult(
+                            detectedClass = "Normal Speech / Ambient Calm",
+                            confidence = 0.98f,
+                            timestamp = System.currentTimeMillis(),
+                            riskLevel = com.example.safora.data.model.RiskLevel.LOW,
+                            details = "Benign baseline conversation"
+                        )
                     )
                 },
                 modifier = Modifier.weight(1f),
@@ -271,9 +339,15 @@ fun MonitoringScreen(
             OutlinedButton(
                 onClick = {
                     repository.updateAudioDetection(
-                        AudioDetectionResult("Sudden Impact / Thud", 0.91f, System.currentTimeMillis())
+                        AudioDetectionResult(
+                            detectedClass = "Sudden High-G Acoustic Impact",
+                            confidence = 0.91f,
+                            timestamp = System.currentTimeMillis(),
+                            riskLevel = com.example.safora.data.model.RiskLevel.HIGH,
+                            details = "Blunt physical impact detected"
+                        )
                     )
-                    repository.triggerPossibleDistress("Sudden Impact / Thud")
+                    repository.confirmSos("AI_PHYSICAL_IMPACT")
                 },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp)

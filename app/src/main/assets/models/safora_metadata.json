@@ -1,0 +1,31 @@
+{
+  "model_name": "SAFORA Binary Text Safety Baseline",
+  "base_model": "distilbert/distilbert-base-multilingual-cased",
+  "source_dataset": "Nebulixlabs/FullSafety",
+  "labels": [
+    "BENIGN",
+    "HARMFUL"
+  ],
+  "threshold": 0.05,
+  "validation_metrics": {
+    "threshold": 0.05,
+    "precision": 0.9681818181818181,
+    "recall": 0.9815668202764977,
+    "f1": 0.9748283752860412
+  },
+  "test_accuracy": 0.9685099846390169,
+  "test_confusion_matrix": [
+    [
+      618,
+      33
+    ],
+    [
+      8,
+      643
+    ]
+  ],
+  "max_length": 128,
+  "status": "research_only",
+  "validated_for_emergency_escalation": false,
+  "not_equivalent_to_safora_risk_v2": true
+}
