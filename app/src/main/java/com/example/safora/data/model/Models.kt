@@ -15,6 +15,14 @@ enum class DeviceConnectionState {
     CONNECTED
 }
 
+enum class HardwareErrorState {
+    NONE,
+    CAMERA_ERROR,
+    SD_CARD_ERROR,
+    STORAGE_FULL,
+    DISCONNECTED
+}
+
 data class DiscoveredBleDevice(
     val name: String,
     val address: String,
@@ -29,6 +37,7 @@ data class WearableDevice(
     val batteryLevel: Int = 85,
     val isRecording: Boolean = false,
     val lastPingMs: Long = 0L,
+    val hardwareError: HardwareErrorState = HardwareErrorState.NONE,
     val consoleLogs: List<String> = listOf("System ready. Bluetooth Low Energy stack initialized.")
 )
 
@@ -49,7 +58,7 @@ data class Incident(
     val latitude: Double = 28.6139,
     val longitude: Double = 77.2090,
     val state: IncidentState = IncidentState.IDLE,
-    val triggerSource: String = "MANUAL", // "MANUAL", "VOICE_ML", "WEARABLE_BUTTON"
+    val triggerSource: String = "MANUAL",
     val evidenceSegmentsCount: Int = 0,
     val alertsSentCount: Int = 0,
     val timeline: List<String> = emptyList(),
@@ -79,7 +88,7 @@ data class Contact(
     val phone: String,
     val relationship: String,
     val isEmergencyContact: Boolean = true,
-    val keyShareHex: String = "", // Shamir's secret share for this contact
+    val keyShareHex: String = "",
     val hasApprovedAccess: Boolean = false
 )
 

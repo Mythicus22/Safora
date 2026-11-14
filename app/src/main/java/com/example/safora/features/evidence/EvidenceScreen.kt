@@ -7,7 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -25,27 +24,44 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.safora.data.model.EvidenceSegment
 import com.example.safora.data.repository.SaforaRepository
+import com.example.safora.services.wifi.Esp32SoftApManager
+import com.example.safora.services.wifi.SoftApConnectionState
+import com.example.safora.services.wifi.WifiEvidenceFetcher
 import com.example.safora.ui.theme.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
 fun EvidenceScreen() {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val repository = remember { SaforaRepository.getInstance(context) }
     val evidenceList by repository.evidenceList.collectAsState()
     val incident by repository.currentIncident.collectAsState()
     val contacts by repository.contacts.collectAsState()
     val esp32Host by repository.esp32WifiHost.collectAsState()
 
+    val softApManager = remember { Esp32SoftApManager(context) }
+    val softApState by softApManager.connectionState.collectAsState()
+    val softApStatusText by softApManager.statusMessage.collectAsState()
+    val evidenceFetcher = remember { WifiEvidenceFetcher(context, context.cacheDir, softApManager) }
+
     var hostInput by remember { mutableStateOf(esp32Host) }
     var selectedSegment by remember { mutableStateOf<EvidenceSegment?>(null) }
     var showThresholdDialog by remember { mutableStateOf(false) }
+    var isDownloading by remember { mutableStateOf(false) }
 
     val emergencyContacts = contacts.filter { it.isEmergencyContact }
     val approvedCount = emergencyContacts.count { it.hasApprovedAccess }
     val threshold = incident.thresholdRequired
     val isDecryptionUnlocked = approvedCount >= threshold && threshold > 0
+
+    DisposableEffect(Unit) {
+        onDispose {
+            softApManager.disconnect()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -69,13 +85,12 @@ fun EvidenceScreen() {
                     color = Color.White
                 )
                 Text(
-                    text = "Backblaze B2 • AES-256-GCM • 50% Threshold Access",
+                    text = "WifiNetworkSpecifier • 5s ZIP Segments • B2 Cloud Sync",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
             }
 
-            // Sync All Button
             if (evidenceList.isNotEmpty()) {
                 IconButton(onClick = { repository.syncAllEvidence() }) {
                     Icon(Icons.Default.CloudSync, contentDescription = "Sync All", tint = BluePrimary)
@@ -85,11 +100,9 @@ fun EvidenceScreen() {
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // 50% Trusted Contact Approval Status Card (Shamir's Secret Sharing)
+        // WifiNetworkSpecifier SoftAP Binding Status Card
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { showThresholdDialog = true },
+            modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CharcoalSurfaceElevated),
             shape = RoundedCornerShape(12.dp)
         ) {
@@ -99,35 +112,43 @@ fun EvidenceScreen() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (isDecryptionUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = if (isDecryptionUnlocked) EmeraldSafe else AmberWarning,
-                            modifier = Modifier.size(20.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "ESP32-CAM Wi-Fi SoftAP Network Binding",
+                            color = CyanAccent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = "50% TRUSTED CONTACT ACCESS CONTROL",
-                                color = if (isDecryptionUnlocked) EmeraldSafe else AmberWarning,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (isDecryptionUnlocked) {
-                                    "Threshold Met ($approvedCount/$threshold Approvals) • Decryption Authorized"
-                                } else {
-                                    "$approvedCount of $threshold Approvals Required to Decrypt • Zero Admin Access"
-                                },
-                                color = TextPrimary,
-                                fontSize = 11.sp
-                            )
-                        }
+                        Text(
+                            text = softApStatusText,
+                            color = when (softApState) {
+                                SoftApConnectionState.CONNECTED -> EmeraldSafe
+                                SoftApConnectionState.CONNECTING -> AmberWarning
+                                SoftApConnectionState.FAILED -> CrimsonEmergency
+                                SoftApConnectionState.DISCONNECTED -> TextSecondary
+                            },
+                            fontSize = 10.sp
+                        )
                     }
 
-                    TextButton(onClick = { showThresholdDialog = true }) {
-                        Text(if (isDecryptionUnlocked) "Authorized" else "Manage", color = CyanAccent, fontSize = 11.sp)
+                    Button(
+                        onClick = {
+                            if (softApState == SoftApConnectionState.CONNECTED) {
+                                softApManager.disconnect()
+                            } else {
+                                softApManager.connectToEsp32SoftAp(
+                                    ssid = Esp32SoftApManager.DEFAULT_SSID,
+                                    passphrase = Esp32SoftApManager.DEFAULT_PASSWORD
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (softApState == SoftApConnectionState.CONNECTED) CrimsonEmergencyDark else BluePrimary
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(if (softApState == SoftApConnectionState.CONNECTED) "Unbind" else "Bind Wi-Fi", fontSize = 11.sp)
                     }
                 }
             }
@@ -135,71 +156,79 @@ fun EvidenceScreen() {
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // ESP32 Wi-Fi SoftAP Configuration Bar
+        // 50% Trusted Contact Approval Status Card (Shamir's Secret Sharing)
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showThresholdDialog = true },
             colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "ESP32-CAM Wi-Fi SoftAP Receiver Endpoint",
-                    color = CyanAccent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = hostInput,
-                        onValueChange = { hostInput = it },
-                        label = { Text("SoftAP IP (e.g. 192.168.4.1)") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = BluePrimary,
-                            unfocusedBorderColor = CharcoalBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
+                    Icon(
+                        imageVector = if (isDecryptionUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = if (isDecryptionUnlocked) EmeraldSafe else AmberWarning,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { repository.setEsp32WifiHost(hostInput) },
-                        colors = ButtonDefaults.buttonColors(containerColor = BluePrimary),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("Save")
+                    Column {
+                        Text(
+                            text = "50% CONTACT ACCESS CONTROL (SHAMIR)",
+                            color = if (isDecryptionUnlocked) EmeraldSafe else AmberWarning,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isDecryptionUnlocked) {
+                                "Threshold Met ($approvedCount/$threshold Approvals) • Decryption Authorized"
+                            } else {
+                                "$approvedCount of $threshold Approvals • Backend Admins Cannot Access"
+                            },
+                            color = TextPrimary,
+                            fontSize = 10.sp
+                        )
                     }
+                }
+
+                TextButton(onClick = { showThresholdDialog = true }) {
+                    Text(if (isDecryptionUnlocked) "Authorized" else "Manage", color = CyanAccent, fontSize = 11.sp)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Ingest Evidence Action
+        // Ingest ZIP Segment Action with Retry and Network Binding
         Button(
             onClick = {
-                val newSegNum = evidenceList.size + 1
-                val newSeg = EvidenceSegment(
-                    id = "ev_seg_$newSegNum",
-                    incidentId = if (incident.id.isNotBlank()) incident.id else "INC-8921",
-                    segmentNumber = newSegNum,
-                    timestamp = System.currentTimeMillis(),
-                    fileSizeKb = (395..460).random(),
-                    isEncrypted = true,
-                    isUploaded = false,
-                    sha256Hash = UUID.randomUUID().toString().replace("-", "") + "fa90"
-                )
-                repository.addEvidenceSegment(newSeg)
+                val nextSegIndex = evidenceList.size + 1
+                val incId = if (incident.id.isNotBlank()) incident.id else "INC-8921"
+                isDownloading = true
+                coroutineScope.launch {
+                    evidenceFetcher.fetchZipSegmentWithRetry(incId, nextSegIndex)
+                    isDownloading = false
+                }
             },
+            enabled = !isDownloading,
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = CharcoalSurfaceElevated),
             shape = RoundedCornerShape(10.dp)
         ) {
-            Icon(Icons.Default.Wifi, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.Download, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Simulate Ingesting Segment & Autonomous B2 Sync", color = TextPrimary, fontSize = 12.sp)
+            Text(
+                text = if (isDownloading) "Downloading 5s ZIP Segment..." else "Download 5s ZIP Segment (with Retry)",
+                color = TextPrimary,
+                fontSize = 12.sp
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -226,7 +255,7 @@ fun EvidenceScreen() {
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "When an SOS incident is triggered, 5-second camera\nsegments are encrypted with AES-256-GCM and stored locally / in B2.",
+                        text = "5-second ZIP segments (JPEGs + manifest.json) from ESP32\nwill be decrypted and synchronized autonomously.",
                         color = TextTertiary,
                         fontSize = 11.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -264,7 +293,7 @@ fun EvidenceScreen() {
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        Icons.Default.Videocam,
+                                        Icons.Default.FolderZip,
                                         contentDescription = null,
                                         tint = CrimsonEmergency
                                     )
@@ -272,14 +301,14 @@ fun EvidenceScreen() {
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "Segment #${segment.segmentNumber}",
+                                        text = "ZIP Segment #${segment.segmentNumber}",
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary
                                     )
                                     Text(
-                                        text = "${segment.fileSizeKb} KB • ${segment.durationSeconds}s • ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(segment.timestamp))}",
+                                        text = "${segment.fileSizeKb} KB • ${segment.resolution} • ${SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(segment.timestamp))}",
                                         color = TextSecondary,
-                                        fontSize = 11.sp
+                                        fontSize = 10.sp
                                     )
                                 }
                             }
@@ -290,7 +319,7 @@ fun EvidenceScreen() {
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
                                     Text(
-                                        text = "AES-256 GCM",
+                                        text = "AES-GCM",
                                         color = EmeraldSafe,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
@@ -384,7 +413,7 @@ fun EvidenceScreen() {
             onDismissRequest = { selectedSegment = null },
             title = {
                 Text(
-                    text = "Evidence Segment #${segment.segmentNumber}",
+                    text = "ZIP Segment #${segment.segmentNumber} Details",
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
@@ -414,7 +443,7 @@ fun EvidenceScreen() {
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = if (isDecryptionUnlocked) "DECRYPTED ESP32 JPEG FRAME" else "CIPHERTEXT ENCRYPTED (AES-256)",
+                                text = if (isDecryptionUnlocked) "DECRYPTED ZIP FRAMES & MANIFEST" else "ENCRYPTED ZIP CIPHERTEXT (AES-256-GCM)",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -428,7 +457,7 @@ fun EvidenceScreen() {
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text("Duration: ${segment.durationSeconds} seconds (~10 JPEG frames)", color = TextPrimary, fontSize = 12.sp)
+                    Text("Content: 5s ZIP archive (manifest.json + JPEG frames)", color = TextPrimary, fontSize = 12.sp)
                     Text("Size: ${segment.fileSizeKb} KB", color = TextSecondary, fontSize = 11.sp)
                     Text("Cipher: AES-256-GCM (Authenticated)", color = EmeraldSafe, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Text(

@@ -5,8 +5,8 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.safora.core.utils.PermissionHelper
 import com.example.safora.data.model.DeviceConnectionState
+import com.example.safora.data.model.HardwareErrorState
 import com.example.safora.data.model.DiscoveredBleDevice
 import com.example.safora.data.repository.SaforaRepository
 import com.example.safora.services.ble.BleManager
@@ -89,6 +90,43 @@ fun DevicePairingScreen(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
+
+        // Hardware Error Banner (if error received via BLE)
+        if (wearable.hardwareError != HardwareErrorState.NONE) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                color = CrimsonEmergencyDark,
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "HARDWARE FAULT DETECTED",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = when (wearable.hardwareError) {
+                                HardwareErrorState.CAMERA_ERROR -> "OV2640 camera sensor error (CAMERA_ERROR)"
+                                HardwareErrorState.SD_CARD_ERROR -> "MicroSD card write failure (SD_CARD_ERROR)"
+                                HardwareErrorState.STORAGE_FULL -> "MicroSD card full (STORAGE_FULL)"
+                                else -> "Wearable error"
+                            },
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+        }
 
         // Device Connection Card
         Card(
@@ -156,7 +194,7 @@ fun DevicePairingScreen(
                 ) {
                     Text("ESP32-CAM Status", color = TextSecondary, fontSize = 12.sp)
                     Text(
-                        if (wearable.isRecording) "RECORDING (MicroSD Segments)" else "STANDBY (OV2640 Ready)",
+                        if (wearable.isRecording) "RECORDING (ZIP Segments)" else "STANDBY (OV2640 Ready)",
                         color = if (wearable.isRecording) CrimsonEmergency else EmeraldSafe,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
@@ -215,10 +253,34 @@ fun DevicePairingScreen(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
-                            if (wearable.isRecording) "Stop Recording" else "Test Camera Capture",
+                            if (wearable.isRecording) "Stop Capture" else "Test Record",
                             color = if (wearable.isRecording) CrimsonEmergency else TextPrimary,
                             fontSize = 11.sp
                         )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Extra Hardware Commands: PING and GET_STATUS
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { bleManager.sendCommand("PING") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Send PING", fontSize = 11.sp, color = CyanAccent)
+                    }
+
+                    OutlinedButton(
+                        onClick = { bleManager.sendCommand("GET_STATUS") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("GET_STATUS", fontSize = 11.sp, color = BluePrimary)
                     }
                 }
             }
@@ -326,9 +388,9 @@ fun DevicePairingScreen(
                 }
             }
         } else {
-            // BLE GATT Technical details
+            // Hardware BLE specification details
             Text(
-                text = "CONFIGURED HARDWARE BLE GATT PROFILE",
+                text = "EXACT HARDWARE BLE GATT SPECIFICATION",
                 color = TextSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold
@@ -341,19 +403,19 @@ fun DevicePairingScreen(
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "Primary Service: 7c1e0001-8a4b-4f3c-9d2e-1b6a5c7d0001",
+                        text = "Service: 7c1e0001-8a4b-4f3c-9d2e-1b6a5c7d0001",
                         color = TextSecondary,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = "Write Command Char: 7c1e0002 (START_RECORD / STOP_RECORD)",
+                        text = "Commands: START_RECORD, STOP_RECORD, GET_STATUS, PING",
                         color = TextSecondary,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = "Notify Event Char: 7c1e0004 (MANUAL_SOS, RECORDING_STARTED)",
+                        text = "Events: MANUAL_SOS, RECORDING_STARTED, CAMERA_ERROR, SD_CARD_ERROR, STORAGE_FULL",
                         color = TextSecondary,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
@@ -379,7 +441,7 @@ fun DevicePairingScreen(
         ) {
             Icon(Icons.Default.TouchApp, contentDescription = null, tint = Color.Black)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Simulate Wearable Necklace Physical Button Press", color = Color.Black, fontWeight = FontWeight.Bold)
+            Text("Simulate Wearable Physical Button Press", color = Color.Black, fontWeight = FontWeight.Bold)
         }
     }
 
