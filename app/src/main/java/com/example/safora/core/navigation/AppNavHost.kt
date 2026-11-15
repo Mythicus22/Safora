@@ -23,11 +23,44 @@ import com.example.safora.features.settings.SettingsScreen
 import com.example.safora.features.splash.SplashScreen
 import com.example.safora.ui.theme.*
 
+import androidx.compose.ui.platform.LocalContext
+import com.example.safora.core.utils.PermissionHelper
+import com.example.safora.data.model.IncidentState
+import com.example.safora.data.repository.SaforaRepository
+import com.example.safora.services.audio.AudioMonitoringService
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+
 @Composable
 fun AppNavHost(initialNavigateToProfile: Boolean = false) {
+    val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
+    val incident by repository.currentIncident.collectAsState()
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    // Automatically navigate to Emergency Screen whenever an active SOS incident is ongoing
+    LaunchedEffect(incident.state, currentRoute) {
+        val isSosActive = incident.state == IncidentState.VERIFYING ||
+            incident.state == IncidentState.CONFIRMED_SOS ||
+            incident.state == IncidentState.ALERTS_SENT ||
+            incident.state == IncidentState.EVIDENCE_SYNCING
+
+        if (isSosActive && currentRoute != Screen.Emergency.route && currentRoute != Screen.Splash.route) {
+            navController.navigate(Screen.Emergency.route) {
+                launchSingleTop = true
+            }
+        }
+    }
+
+    // Ensure continuous microphone listening is active across all screens
+    LaunchedEffect(Unit) {
+        if (PermissionHelper.hasAudioPermission(context)) {
+            AudioMonitoringService.start(context)
+        }
+    }
 
     val bottomTabs = listOf(
         BottomNavTab.Home,
@@ -105,7 +138,16 @@ fun AppNavHost(initialNavigateToProfile: Boolean = false) {
             composable(Screen.Splash.route) {
                 SplashScreen(
                     onNavigateToDashboard = {
-                        val destination = if (initialNavigateToProfile) Screen.Settings.route else Screen.Dashboard.route
+                        val isSosActive = incident.state == IncidentState.VERIFYING ||
+                            incident.state == IncidentState.CONFIRMED_SOS ||
+                            incident.state == IncidentState.ALERTS_SENT ||
+                            incident.state == IncidentState.EVIDENCE_SYNCING
+
+                        val destination = when {
+                            isSosActive -> Screen.Emergency.route
+                            initialNavigateToProfile -> Screen.Settings.route
+                            else -> Screen.Dashboard.route
+                        }
                         navController.navigate(destination) {
                             popUpTo(Screen.Splash.route) { inclusive = true }
                         }
@@ -144,7 +186,13 @@ fun AppNavHost(initialNavigateToProfile: Boolean = false) {
             }
             composable(Screen.Emergency.route) {
                 EmergencyScreen(
-                    onDismissToDashboard = { navController.popBackStack() },
+                    onDismissToDashboard = {
+                        if (!navController.popBackStack()) {
+                            navController.navigate(Screen.Dashboard.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    },
                     onNavigateToEvidence = { navController.navigate(Screen.Evidence.route) }
                 )
             }

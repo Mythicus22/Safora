@@ -52,12 +52,17 @@ class SharedAudioCaptureEngine private constructor(private val context: Context)
     private val isRecording = AtomicBoolean(false)
     private var audioRecord: AudioRecord? = null
     private var captureJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val captureExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e(TAG, "Unhandled exception in AudioCapture coroutine: ${throwable.message}", throwable)
+    }
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() + captureExceptionHandler)
 
     private val listeners = CopyOnWriteArrayList<Pair<String, AudioStreamListener>>()
 
-    // In-memory rolling audio buffer (10 seconds, ~320 KB)
-    private val rollingRamBuffer = ByteBuffer.allocateDirect(ROLLING_BUFFER_CAPACITY_BYTES)
+    // In-memory rolling audio buffer (10 seconds, ~320 KB) implemented as a crash-proof circular ring buffer
+    private val rollingRamBuffer = ByteArray(ROLLING_BUFFER_CAPACITY_BYTES)
+    private var rollingHead = 0
+    private var rollingCount = 0
     private val ramBufferLock = Any()
 
     fun addListener(id: String, listener: AudioStreamListener) {
@@ -137,43 +142,41 @@ class SharedAudioCaptureEngine private constructor(private val context: Context)
 
             captureJob = scope.launch {
                 val frameChunk = ShortArray(1024) // 64ms chunk @ 16kHz
-                val byteBuffer = ByteBuffer.allocate(frameChunk.size * 2).order(ByteOrder.LITTLE_ENDIAN)
 
-                while (isActive && isRecording.get()) {
-                    val readSamples = audioRecord?.read(frameChunk, 0, frameChunk.size) ?: -1
-                    if (readSamples > 0) {
-                        // 1. Append to Rolling RAM Buffer for emergency evidence snapshot
-                        synchronized(ramBufferLock) {
-                            byteBuffer.clear()
-                            for (i in 0 until readSamples) {
-                                byteBuffer.putShort(frameChunk[i])
-                            }
-                            byteBuffer.flip()
+                try {
+                    while (isActive && isRecording.get()) {
+                        val readSamples = audioRecord?.read(frameChunk, 0, frameChunk.size) ?: -1
+                        if (readSamples > 0) {
+                            // 1. Append to Rolling RAM Buffer for emergency evidence snapshot (Crash-proof circular ring)
+                            synchronized(ramBufferLock) {
+                                for (i in 0 until readSamples) {
+                                    val sample = frameChunk[i]
+                                    rollingRamBuffer[rollingHead] = (sample.toInt() and 0xFF).toByte()
+                                    rollingHead = (rollingHead + 1) % ROLLING_BUFFER_CAPACITY_BYTES
+                                    rollingRamBuffer[rollingHead] = ((sample.toInt() shr 8) and 0xFF).toByte()
+                                    rollingHead = (rollingHead + 1) % ROLLING_BUFFER_CAPACITY_BYTES
 
-                            val bytesToWrite = readSamples * 2
-                            if (rollingRamBuffer.remaining() < bytesToWrite) {
-                                // Shift buffer window forward
-                                val discard = bytesToWrite - rollingRamBuffer.remaining()
-                                rollingRamBuffer.position(discard)
-                                rollingRamBuffer.compact()
+                                    if (rollingCount < ROLLING_BUFFER_CAPACITY_BYTES) {
+                                        rollingCount = (rollingCount + 2).coerceAtMost(ROLLING_BUFFER_CAPACITY_BYTES)
+                                    }
+                                }
                             }
-                            val rawBytes = ByteArray(bytesToWrite)
-                            byteBuffer.get(rawBytes)
-                            rollingRamBuffer.put(rawBytes)
+
+                            // 2. Broadcast frame to all registered listeners (YAMNet, VAD, Vosk)
+                            for ((_, listener) in listeners) {
+                                try {
+                                    listener.onAudioFrame(frameChunk, readSamples)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error in audio listener: ${e.message}")
+                                }
+                            }
+                        } else if (readSamples < 0) {
+                            Log.w(TAG, "AudioRecord read error code: $readSamples")
+                            delay(20)
                         }
-
-                        // 2. Broadcast frame to all registered listeners (YAMNet, VAD, Vosk)
-                        for ((_, listener) in listeners) {
-                            try {
-                                listener.onAudioFrame(frameChunk, readSamples)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error in audio listener: ${e.message}")
-                            }
-                        }
-                    } else if (readSamples < 0) {
-                        Log.w(TAG, "AudioRecord read error code: $readSamples")
-                        delay(20)
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Loop exception in audio capture: ${e.message}", e)
                 }
             }
 
@@ -214,15 +217,15 @@ class SharedAudioCaptureEngine private constructor(private val context: Context)
         return try {
             val pcmBytes: ByteArray
             synchronized(ramBufferLock) {
-                rollingRamBuffer.flip()
-                pcmBytes = ByteArray(rollingRamBuffer.remaining())
-                rollingRamBuffer.get(pcmBytes)
-                rollingRamBuffer.clear()
-            }
-
-            if (pcmBytes.isEmpty()) {
-                Log.w(TAG, "Rolling RAM buffer is empty; cannot snapshot audio")
-                return false
+                if (rollingCount <= 0) {
+                    Log.w(TAG, "Rolling RAM buffer is empty; cannot snapshot audio")
+                    return false
+                }
+                pcmBytes = ByteArray(rollingCount)
+                val start = if (rollingCount < ROLLING_BUFFER_CAPACITY_BYTES) 0 else rollingHead
+                for (i in 0 until rollingCount) {
+                    pcmBytes[i] = rollingRamBuffer[(start + i) % ROLLING_BUFFER_CAPACITY_BYTES]
+                }
             }
 
             FileOutputStream(outputFile).use { fos ->

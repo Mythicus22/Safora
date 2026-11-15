@@ -299,7 +299,11 @@ fun MonitoringScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Real-time VU Meter Bar
-                val normalizedDbfs = ((diagnostics.currentRmsDbfs + 80f) / 80f).coerceIn(0.01f, 1.0f)
+                val rawDbfs = diagnostics.currentRmsDbfs
+                val safeDbfs = if (rawDbfs.isNaN() || rawDbfs.isInfinite()) -80.0f else rawDbfs.coerceIn(-100.0f, 0.0f)
+                val rawNormalized = ((safeDbfs + 80.0f) / 80.0f)
+                val normalizedDbfs = if (rawNormalized.isNaN() || rawNormalized.isInfinite()) 0.0f else rawNormalized.coerceIn(0.0f, 1.0f)
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -318,15 +322,15 @@ fun MonitoringScreen(
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp)),
                         color = when {
-                            diagnostics.currentRmsDbfs > -20f -> CrimsonEmergency
-                            diagnostics.currentRmsDbfs > -40f -> AmberWarning
+                            safeDbfs > -20f -> CrimsonEmergency
+                            safeDbfs > -40f -> AmberWarning
                             else -> EmeraldSafe
                         },
                         trackColor = CharcoalBorder
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${"%.1f".format(diagnostics.currentRmsDbfs)} dBFS",
+                        text = "${"%.1f".format(safeDbfs)} dBFS",
                         color = TextPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -425,19 +429,22 @@ fun MonitoringScreen(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.width(90.dp)
                     )
+                    val rawScream = diagnostics.yamnetScreamConfidence
+                    val safeScream = if (rawScream.isNaN() || rawScream.isInfinite()) 0.0f else rawScream.coerceIn(0.0f, 1.0f)
+
                     LinearProgressIndicator(
-                        progress = { diagnostics.yamnetScreamConfidence },
+                        progress = { safeScream },
                         modifier = Modifier
                             .weight(1f)
                             .height(6.dp)
                             .clip(RoundedCornerShape(3.dp)),
-                        color = if (diagnostics.yamnetScreamConfidence >= 0.72f) CrimsonEmergency else AmberWarning,
+                        color = if (safeScream >= 0.72f) CrimsonEmergency else AmberWarning,
                         trackColor = CharcoalBorder
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${(diagnostics.yamnetScreamConfidence * 100).toInt()}%",
-                        color = if (diagnostics.yamnetScreamConfidence >= 0.72f) CrimsonEmergency else TextPrimary,
+                        text = "${(safeScream * 100).toInt()}%",
+                        color = if (safeScream >= 0.72f) CrimsonEmergency else TextPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
@@ -622,8 +629,11 @@ fun MonitoringScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Score Progress Bar
+                val rawSafety = diagnostics.safetyRiskScore
+                val safeSafetyRatio = if (rawSafety.isNaN() || rawSafety.isInfinite()) 0.0f else (rawSafety / 0.5f).coerceIn(0.0f, 1.0f)
+
                 LinearProgressIndicator(
-                    progress = { (diagnostics.safetyRiskScore / 0.5f).coerceIn(0f, 1f) },
+                    progress = { safeSafetyRatio },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(6.dp)

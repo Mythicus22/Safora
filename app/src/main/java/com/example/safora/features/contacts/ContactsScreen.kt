@@ -33,8 +33,8 @@ import com.example.safora.ui.theme.*
 fun ContactsScreen(
     onBack: () -> Unit
 ) {
-    val repository = SaforaRepository.instance
     val context = LocalContext.current
+    val repository = remember { SaforaRepository.getInstance(context) }
     val contacts by repository.contacts.collectAsState()
 
     var showManualAddDialog by remember { mutableStateOf(false) }

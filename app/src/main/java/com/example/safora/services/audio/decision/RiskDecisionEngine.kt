@@ -22,10 +22,10 @@ interface RiskDecisionListener {
  * duplicate-trigger cooldowns, and an independent fast-track for severe screams.
  */
 class RiskDecisionEngine(
-    private var screamFastTrackThreshold: Float = 0.72f,
-    private var moderateAcousticThreshold: Float = 0.50f,
+    private var screamFastTrackThreshold: Float = 0.28f,
+    private var moderateAcousticThreshold: Float = 0.18f,
     private var textHarmfulThreshold: Float = 0.05f,
-    private val emergencyCooldownMs: Long = 60000L // 1 minute cooldown to prevent duplicate triggers
+    private val emergencyCooldownMs: Long = 45000L // 45 seconds cooldown to prevent duplicate triggers
 ) {
 
     companion object {
@@ -54,16 +54,16 @@ class RiskDecisionEngine(
     fun updateSensitivity(level: String) {
         when (level.lowercase()) {
             "high" -> {
-                screamFastTrackThreshold = 0.62f
-                moderateAcousticThreshold = 0.42f
+                screamFastTrackThreshold = 0.20f
+                moderateAcousticThreshold = 0.14f
             }
             "low" -> {
-                screamFastTrackThreshold = 0.82f
-                moderateAcousticThreshold = 0.60f
+                screamFastTrackThreshold = 0.40f
+                moderateAcousticThreshold = 0.28f
             }
             else -> {
-                screamFastTrackThreshold = 0.72f
-                moderateAcousticThreshold = 0.50f
+                screamFastTrackThreshold = 0.28f
+                moderateAcousticThreshold = 0.18f
             }
         }
         Log.d(TAG, "Risk Decision Engine thresholds updated ($level): FastTrack=$screamFastTrackThreshold, Moderate=$moderateAcousticThreshold")
@@ -81,11 +81,11 @@ class RiskDecisionEngine(
             recentAcousticHistory.removeAll { (now - it.timestamp) > 20000L } // 20s window
         }
 
-        // Check for FAST ACOUSTIC ESCALATION (Scream alone can trigger HIGH risk immediately)
-        if (result.screamConfidence >= screamFastTrackThreshold) {
+        // Check for FAST ACOUSTIC ESCALATION (Scream / Crying alone can trigger HIGH risk immediately)
+        if (result.screamConfidence >= screamFastTrackThreshold || (result.isDistressAcoustic && result.dominantConfidence >= screamFastTrackThreshold)) {
             evaluateDecision(
                 forcedHigh = true,
-                forcedReason = "Severe distress scream detected (Confidence: ${(result.screamConfidence * 100).toInt()}%)"
+                forcedReason = "Severe distress voice detected (${result.dominantClass}, ${(result.screamConfidence * 100).toInt()}%)"
             )
             return
         }
@@ -143,6 +143,14 @@ class RiskDecisionEngine(
                     triggerEmergency = true
                 }
 
+                // Rule 1.5: Sustained Acoustic Distress (2 consecutive frames of crying / screaming)
+                screamScore >= moderateAcousticThreshold && recentAcousticHistory.takeLast(2).count { it.screamConfidence >= moderateAcousticThreshold || it.isDistressAcoustic } >= 2 -> {
+                    level = RiskLevel.HIGH
+                    compositeScore = screamScore
+                    reason = "Sustained acoustic distress detected (${acoustic?.dominantClass ?: "Distress voices"})"
+                    triggerEmergency = true
+                }
+
                 // Rule 2: Repeated Persistent Threat Context (3 consecutive harmful classifications)
                 consecutiveHarmfulCount >= 3 && textScore >= 0.65f -> {
                     level = RiskLevel.HIGH
@@ -174,8 +182,9 @@ class RiskDecisionEngine(
 
         // Apply Cooldown Protection to prevent duplicate cascading triggers
         if (triggerEmergency) {
-            if (now - lastEmergencyTriggerTimeMs < emergencyCooldownMs) {
-                Log.d(TAG, "Emergency trigger suppressed due to active cooldown (${(now - lastEmergencyTriggerTimeMs) / 1000}s elapsed)")
+            val cooldownElapsed = now - lastEmergencyTriggerTimeMs
+            if (lastEmergencyTriggerTimeMs > now || cooldownElapsed < emergencyCooldownMs) {
+                Log.d(TAG, "Emergency trigger suppressed due to active cooldown")
                 triggerEmergency = false
             } else {
                 lastEmergencyTriggerTimeMs = now
@@ -198,7 +207,7 @@ class RiskDecisionEngine(
                 listener.onRiskEvaluated(decisionResult)
                 if (triggerEmergency) {
                     listener.onEmergencyTriggerRequired(
-                        triggerSource = if (screamScore >= screamFastTrackThreshold) "AI_ACOUSTIC_SCREAM" else "AI_MULTIMODAL_FUSION",
+                        triggerSource = if (screamScore >= screamFastTrackThreshold || forcedHigh) "AI_ACOUSTIC_SCREAM" else "AI_MULTIMODAL_FUSION",
                         reason = reason
                     )
                 }
@@ -210,5 +219,20 @@ class RiskDecisionEngine(
 
     fun resetCooldown() {
         lastEmergencyTriggerTimeMs = 0L
+    }
+
+    /**
+     * Clears rolling prediction buffers and enforces a grace cooldown period
+     * when the user explicitly cancels or marks safe.
+     */
+    fun cancelAndReset(cooldownMs: Long = 30000L) {
+        synchronized(historyLock) {
+            recentAcousticHistory.clear()
+            recentTextHistory.clear()
+        }
+        latestAcousticResult = null
+        latestTextResult = null
+        lastEmergencyTriggerTimeMs = System.currentTimeMillis() + cooldownMs
+        Log.i(TAG, "Risk Decision Engine cancelled and reset with ${cooldownMs / 1000}s cooldown.")
     }
 }

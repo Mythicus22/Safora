@@ -27,8 +27,8 @@ interface YamnetDetectionListener {
  */
 class YamnetDetectionEngine(
     private val context: Context,
-    private var screamEmergencyThreshold: Float = 0.72f,
-    private var generalDistressThreshold: Float = 0.55f
+    private var screamEmergencyThreshold: Float = 0.28f,
+    private var generalDistressThreshold: Float = 0.18f
 ) : AudioStreamListener {
 
     companion object {
@@ -109,19 +109,19 @@ class YamnetDetectionEngine(
     fun setSensitivity(level: String) {
         when (level.lowercase()) {
             "high" -> {
-                screamEmergencyThreshold = 0.60f
-                generalDistressThreshold = 0.45f
+                screamEmergencyThreshold = 0.20f
+                generalDistressThreshold = 0.14f
             }
             "low" -> {
-                screamEmergencyThreshold = 0.82f
-                generalDistressThreshold = 0.68f
+                screamEmergencyThreshold = 0.40f
+                generalDistressThreshold = 0.28f
             }
             else -> { // Medium default
-                screamEmergencyThreshold = 0.72f
-                generalDistressThreshold = 0.55f
+                screamEmergencyThreshold = 0.28f
+                generalDistressThreshold = 0.18f
             }
         }
-        Log.d(TAG, "YAMNet thresholds set to Scream: $screamEmergencyThreshold, General: $generalDistressThreshold ($level)")
+        Log.d(TAG, "YAMNet thresholds set to Scream/Distress: $screamEmergencyThreshold, General: $generalDistressThreshold ($level)")
     }
 
     override fun onAudioFrame(pcmData: ShortArray, readSize: Int) {
@@ -172,20 +172,15 @@ class YamnetDetectionEngine(
                 }
                 val scores = outputTensor[0]
 
-                // Extract relevant distress scores
+                // Extract relevant distress scores across all scream & crying classes
                 val rawScream = scores.getOrElse(CLASS_SCREAMING) { 0.0f }
                 val rawShout = scores.getOrElse(CLASS_SHOUT) { 0.0f }
                 val rawYell = scores.getOrElse(CLASS_YELL) { 0.0f }
                 val rawCrying = scores.getOrElse(CLASS_CRYING) { 0.0f }
+                val rawBabyCry = scores.getOrElse(CLASS_BABY_CRY) { 0.0f }
                 val rawWail = scores.getOrElse(CLASS_WAIL) { 0.0f }
                 val rawGroan = scores.getOrElse(CLASS_GROAN) { 0.0f }
                 val rawGasp = scores.getOrElse(CLASS_GASP) { 0.0f }
-
-                screamScore = rawScream
-                generalDistress = max(
-                    rawScream,
-                    max(rawYell * 0.85f, max(rawShout * 0.80f, max(rawWail * 0.75f, rawCrying * 0.70f)))
-                )
 
                 // Find dominant class across all 521 classes
                 var maxIdx = 0
@@ -195,26 +190,50 @@ class YamnetDetectionEngine(
                         maxIdx = i
                     }
                 }
+                val isDominantDistress = maxIdx in DISTRESS_CLASS_NAMES.keys
                 dominantLabel = DISTRESS_CLASS_NAMES[maxIdx] ?: "Acoustic Event ($maxIdx)"
+
+                // Comprehensive distress acoustic aggregation: screams, crying, wailing, yelling, shouting
+                val rawDistress = maxOf(
+                    rawScream,
+                    rawCrying,
+                    rawWail,
+                    rawYell * 0.90f,
+                    rawShout * 0.85f,
+                    rawBabyCry * 0.85f,
+                    rawGroan * 0.75f,
+                    rawGasp * 0.70f
+                )
+
+                val combinedDistress = if (isDominantDistress) {
+                    maxOf(rawDistress, dominantScore)
+                } else {
+                    rawDistress
+                }
+
+                screamScore = combinedDistress
+                generalDistress = combinedDistress
             } catch (e: Exception) {
                 Log.e(TAG, "Inference execution error: ${e.message}")
             }
         } else {
-            // High-frequency energy fallback estimation if TFLite model is loading
+            // Passive energy observation while model is loading; NEVER trigger false scream alarms
             var energySum = 0.0f
             for (s in waveform) energySum += s * s
             val avgEnergy = energySum / waveform.size
-            if (avgEnergy > 0.15f) {
-                screamScore = (avgEnergy * 1.5f).coerceIn(0.0f, 0.85f)
-                generalDistress = screamScore
-                dominantLabel = "Sudden High Acoustic Energy"
-                dominantScore = screamScore
-            }
+            dominantScore = (avgEnergy * 2.0f).coerceIn(0.0f, 0.35f)
+            dominantLabel = if (avgEnergy > 0.10f) "Acoustic Activity" else "Normal Ambient"
+            screamScore = 0.0f
+            generalDistress = 0.0f
         }
 
+        // Guard against NaN / Infinity
+        if (screamScore.isNaN() || screamScore.isInfinite()) screamScore = 0.0f
+        if (generalDistress.isNaN() || generalDistress.isInfinite()) generalDistress = 0.0f
+
         // Apply temporal smoothing (EMA: 60% current, 40% previous)
-        smoothedScreamScore = (smoothedScreamScore * 0.40f) + (screamScore * 0.60f)
-        smoothedGeneralDistress = (smoothedGeneralDistress * 0.40f) + (generalDistress * 0.60f)
+        smoothedScreamScore = ((smoothedScreamScore * 0.40f) + (screamScore * 0.60f)).coerceIn(0.0f, 1.0f)
+        smoothedGeneralDistress = ((smoothedGeneralDistress * 0.40f) + (generalDistress * 0.60f)).coerceIn(0.0f, 1.0f)
 
         val latencyMs = System.currentTimeMillis() - startTime
         val isDistress = smoothedScreamScore >= generalDistressThreshold || smoothedGeneralDistress >= generalDistressThreshold
@@ -239,9 +258,9 @@ class YamnetDetectionEngine(
             }
         }
 
-        // FAST ESCALATION PATH: Immediate trigger if scream confidence exceeds emergency threshold
-        if (smoothedScreamScore >= screamEmergencyThreshold) {
-            Log.w(TAG, "!!! FAST ACOUSTIC DISTRESS ESCALATION TRIGGERED: Scream score = $smoothedScreamScore >= $screamEmergencyThreshold")
+        // FAST ESCALATION PATH: Immediate trigger if acoustic distress/crying/scream confidence exceeds emergency threshold
+        if (smoothedScreamScore >= screamEmergencyThreshold || (isDistress && dominantScore >= screamEmergencyThreshold)) {
+            Log.w(TAG, "!!! FAST ACOUSTIC DISTRESS ESCALATION TRIGGERED: Distress score = $smoothedScreamScore >= $screamEmergencyThreshold ($dominantLabel)")
             synchronized(listeners) {
                 for (l in listeners) {
                     try {
@@ -256,18 +275,33 @@ class YamnetDetectionEngine(
 
     private fun loadModelFile(targetFile: java.io.File?, modelAssetPath: String): ByteBuffer {
         if (targetFile != null && targetFile.exists() && targetFile.length() > 0) {
-            val inputStream = FileInputStream(targetFile)
-            val fileChannel = inputStream.channel
-            return fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, targetFile.length())
-                .order(ByteOrder.nativeOrder())
+            try {
+                val inputStream = FileInputStream(targetFile)
+                val fileChannel = inputStream.channel
+                return fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, targetFile.length())
+                    .order(ByteOrder.nativeOrder())
+            } catch (e: Exception) {
+                Log.w(TAG, "File channel map failed for ${targetFile.absolutePath}: ${e.message}")
+            }
         }
-        val fileDescriptor: AssetFileDescriptor = context.assets.openFd(modelAssetPath)
-        val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        val startOffset = fileDescriptor.startOffset
-        val declaredLength = fileDescriptor.declaredLength
-        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
-            .order(ByteOrder.nativeOrder())
+        return try {
+            val fileDescriptor: AssetFileDescriptor = context.assets.openFd(modelAssetPath)
+            val inputStream = FileInputStream(fileDescriptor.fileDescriptor)
+            val fileChannel = inputStream.channel
+            val startOffset = fileDescriptor.startOffset
+            val declaredLength = fileDescriptor.declaredLength
+            fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength)
+                .order(ByteOrder.nativeOrder())
+        } catch (e: Exception) {
+            Log.i(TAG, "openFd not available for $modelAssetPath; reading asset into direct ByteBuffer")
+            context.assets.open(modelAssetPath).use { input ->
+                val bytes = input.readBytes()
+                val directBuffer = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder())
+                directBuffer.put(bytes)
+                directBuffer.rewind()
+                directBuffer
+            }
+        }
     }
 
     fun close() {

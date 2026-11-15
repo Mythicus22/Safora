@@ -1,18 +1,18 @@
 package com.example.safora.core.utils
 
-import android.app.PendingIntent
+import android.Manifest
 import android.content.Context
-import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.telephony.SmsManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 
 object EmergencyDispatcher {
     private const val TAG = "EmergencyDispatcher"
 
     /**
-     * Sends an actual cellular SMS to emergency contacts containing
-     * the user's live coordinates and incident ID.
+     * Sends an actual cellular SMS to emergency contacts or emergency services (112).
      */
     fun sendDirectSms(
         context: Context,
@@ -21,18 +21,29 @@ object EmergencyDispatcher {
         onSuccess: (() -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ) {
-        val cleanNumber = phoneNumber.filter { it.isDigit() || it == '+' }
+        val cleanNumber = phoneNumber.trim().filter { it.isDigit() || it == '+' }
         if (cleanNumber.isBlank()) {
             onError?.invoke("Invalid phone number")
             return
         }
 
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            val err = "SEND_SMS permission not granted. Please allow SMS permission in app settings."
+            Log.e(TAG, err)
+            onError?.invoke(err)
+            return
+        }
+
         try {
-            val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                context.getSystemService(SmsManager::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                SmsManager.getDefault()
+            val smsManager: SmsManager = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    context.getSystemService(SmsManager::class.java)
+                        ?: @Suppress("DEPRECATION") SmsManager.getDefault()
+                } else {
+                    @Suppress("DEPRECATION") SmsManager.getDefault()
+                }
+            } catch (_: Exception) {
+                @Suppress("DEPRECATION") SmsManager.getDefault()
             }
 
             // Split long emergency messages into parts if needed
@@ -46,13 +57,13 @@ object EmergencyDispatcher {
             Log.i(TAG, "Direct cellular emergency SMS dispatched to $cleanNumber")
             onSuccess?.invoke()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send direct SMS to $cleanNumber: ${e.message}")
+            Log.e(TAG, "Failed to send direct SMS to $cleanNumber: ${e.message}", e)
             onError?.invoke(e.message ?: "Failed to dispatch SMS")
         }
     }
 
     /**
-     * Builds the standard SAFORA emergency broadcast payload.
+     * Builds emergency broadcast payload for trusted contacts.
      */
     fun buildEmergencySmsText(
         userName: String,
@@ -63,6 +74,22 @@ object EmergencyDispatcher {
     ): String {
         val mapLink = "https://maps.google.com/?q=${latitude},${longitude}"
         val bloodText = if (bloodGroup.isNotBlank()) " Blood: $bloodGroup." else ""
-        return "EMERGENCY ALERT: $userName needs immediate help! Location: $mapLink (Lat: ${"%.5f".format(latitude)}, Lng: ${"%.5f".format(longitude)}). Incident ID: $incidentId.$bloodText Sent via SAFORA."
+        return "EMERGENCY SOS: $userName needs immediate help! Location: $mapLink (Lat: ${"%.5f".format(latitude)}, Lng: ${"%.5f".format(longitude)}). Incident ID: $incidentId.$bloodText Sent via SAFORA Safety Shield."
+    }
+
+    /**
+     * Builds formal police / ERSS emergency SMS payload tailored specifically for 112.
+     */
+    fun build112PoliceEmergencySmsText(
+        userName: String,
+        userPhone: String,
+        latitude: Double,
+        longitude: Double,
+        incidentId: String,
+        bloodGroup: String = ""
+    ): String {
+        val mapLink = "https://maps.google.com/?q=${latitude},${longitude}"
+        val bloodText = if (bloodGroup.isNotBlank()) " Blood Group: $bloodGroup." else ""
+        return "EMERGENCY 112: My name is $userName (Phone: $userPhone). I am in immediate distress and danger and need urgent emergency assistance. My current GPS location: $mapLink (Coordinates: ${"%.5f".format(latitude)}, ${"%.5f".format(longitude)}). Incident ID: $incidentId.$bloodText Sent via SAFORA Autonomous Safety System."
     }
 }

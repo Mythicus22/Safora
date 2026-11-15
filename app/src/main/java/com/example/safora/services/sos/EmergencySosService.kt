@@ -19,9 +19,10 @@ import java.util.*
 
 /**
  * Foreground Service responsible for:
- * 1. Immediate autonomous Emergency SMS & Autonomous Sequential Calls on SOS confirmation.
- * 2. Reliable periodic GPS updates every 3 minutes while SOS is active.
- * 3. Graceful termination when SOS is resolved or cancelled.
+ * 1. Immediate autonomous Emergency SMS to all contacts & 112 Police Emergency.
+ * 2. Autonomous Sequential Calls (strictly ONCE per contact).
+ * 3. Reliable periodic GPS updates every 3 minutes while SOS is active.
+ * 4. Immediate and complete cancellation when "I'm Safe" is tapped.
  */
 class EmergencySosService : Service() {
 
@@ -69,33 +70,53 @@ class EmergencySosService : Service() {
         }
 
         val notification = buildForegroundNotification("Active Emergency SOS: GPS Tracking & SMS Active")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed startForeground with LOCATION type: ${e.message}, falling back to basic foreground")
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (fatal: Exception) {
+                Log.e(TAG, "Cannot start SOS foreground service: ${fatal.message}")
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
-        startEmergencyExecution()
+        if (action == ACTION_START) {
+            startEmergencyExecution()
+        } else {
+            resumeEmergencyTracking()
+        }
         return START_STICKY
+    }
+
+    private fun resumeEmergencyTracking() {
+        val repository = SaforaRepository.getInstance(this)
+        locationClient?.startLocationUpdates()
+        startPeriodicSmsUpdates(repository)
     }
 
     private fun startEmergencyExecution() {
         val repository = SaforaRepository.getInstance(this)
         locationClient?.startLocationUpdates()
 
-        // 1. Initial autonomous call dispatch
+        // 1. Initial autonomous call dispatch (each contact is called strictly ONCE)
         val emergencyContacts = repository.contacts.value.filter { it.isEmergencyContact }
         val phoneNumbers = emergencyContacts.map { it.phone }
 
-        if (phoneNumbers.isNotEmpty()) {
+        if (phoneNumbers.isNotEmpty() && !AutonomousCallManager.isSequenceCompleted(this)) {
             AutonomousCallManager.executeSequentialCalls(
                 context = this,
                 phoneNumbers = phoneNumbers,
-                maxRetriesPerContact = 1,
                 onStatusUpdate = { status ->
                     repository.logEmergencyTimeline(status)
                 }
@@ -103,6 +124,11 @@ class EmergencySosService : Service() {
         }
 
         // 2. Start Periodic GPS SMS Updates (every 3 minutes)
+        startPeriodicSmsUpdates(repository)
+    }
+
+    private fun startPeriodicSmsUpdates(repository: SaforaRepository) {
+        if (periodicSmsJob?.isActive == true) return
         periodicSmsJob?.cancel()
         periodicSmsJob = serviceScope.launch {
             while (isActive) {
@@ -125,6 +151,7 @@ class EmergencySosService : Service() {
                 val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 val periodicMsg = "SAFORA UPDATE [$timeStr]: ${user.name} SOS still active. Updated location: https://maps.google.com/?q=${loc.first},${loc.second} (Incident ID: ${incident.id})."
 
+                // Send update to all contacts
                 contacts.forEach { contact ->
                     EmergencyDispatcher.sendDirectSms(
                         context = this@EmergencySosService,
@@ -138,21 +165,45 @@ class EmergencySosService : Service() {
                         }
                     )
                 }
+
+                // Send update to 112
+                val police112Update = EmergencyDispatcher.build112PoliceEmergencySmsText(
+                    userName = user.name.ifBlank { "User" },
+                    userPhone = user.phone.ifBlank { "Unknown" },
+                    latitude = loc.first,
+                    longitude = loc.second,
+                    incidentId = incident.id,
+                    bloodGroup = user.bloodGroup
+                )
+                EmergencyDispatcher.sendDirectSms(
+                    context = this@EmergencySosService,
+                    phoneNumber = "112",
+                    message = police112Update,
+                    onSuccess = {
+                        repository.logEmergencyTimeline("Periodic GPS SMS update delivered to 112")
+                    },
+                    onError = { err ->
+                        Log.w(TAG, "112 periodic update note: $err")
+                    }
+                )
             }
         }
     }
 
     private fun stopSosService() {
         periodicSmsJob?.cancel()
+        periodicSmsJob = null
         locationClient?.stopLocationUpdates()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        AutonomousCallManager.stopAllCalls(this)
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (_: Exception) {}
         stopSelf()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        serviceScope.cancel()
-        locationClient?.stopLocationUpdates()
+        stopSosService()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -164,20 +215,23 @@ class EmergencySosService : Service() {
                 "SAFORA Active Emergency SOS",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Monitors incident dispatch, periodic GPS broadcast and autonomous calling"
+                description = "Critical notification when an emergency incident is active and dispatching alerts."
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
     }
 
-    private fun buildForegroundNotification(content: String): Notification {
+    private fun buildForegroundNotification(contentText: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("EMERGENCY SOS DISPATCH ACTIVE")
-            .setContentText(content)
+            .setContentTitle("🚨 SAFORA Emergency SOS Active")
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .build()
     }
 }

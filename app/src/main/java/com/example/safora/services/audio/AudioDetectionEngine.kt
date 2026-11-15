@@ -28,6 +28,7 @@ import java.io.File
 interface AudioDetectionEngine {
     fun startAnalysis(onDetection: (AudioDetectionResult) -> Unit)
     fun stopAnalysis()
+    fun onUserMarkedSafe() {}
 }
 
 /**
@@ -47,7 +48,7 @@ class RealAudioPipelineEngine(
         private const val TAG = "RealAudioPipeline"
     }
 
-    private val repository = SaforaRepository.instance
+    private val repository by lazy { SaforaRepository.getInstance(context) }
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     // Subsystems
@@ -130,7 +131,7 @@ class RealAudioPipelineEngine(
                         yamnetDominantClass = result.dominantClass,
                         yamnetDominantConfidence = result.dominantConfidence,
                         yamnetScreamConfidence = result.screamConfidence,
-                        isScreamFastTrackFired = result.screamConfidence >= 0.72f,
+                        isScreamFastTrackFired = result.screamConfidence >= 0.28f,
                         totalInferencesCount = diag.totalInferencesCount + 1,
                         lastInferenceLatencyMs = result.inferenceTimeMs,
                         lastUpdatedTimestamp = System.currentTimeMillis()
@@ -139,7 +140,9 @@ class RealAudioPipelineEngine(
             }
 
             override fun onFastDistressEscalation(result: YamnetInferenceResult) {
-                repository.logEmergencyTimeline("FAST ESCALATION: Severe acoustic distress scream (${(result.screamConfidence * 100).toInt()}%)")
+                repository.logEmergencyTimeline("FAST ESCALATION: Severe acoustic distress (${result.dominantClass}, ${(result.screamConfidence * 100).toInt()}%)")
+                saveRollingAudioEvidenceSnapshot()
+                repository.triggerPossibleDistress("AI_ACOUSTIC_DISTRESS: ${result.dominantClass} (${(result.screamConfidence * 100).toInt()}%)")
             }
         })
 
@@ -230,8 +233,8 @@ class RealAudioPipelineEngine(
                 // Snapshot last 10s of raw audio from RAM buffer and encrypt as evidence
                 saveRollingAudioEvidenceSnapshot()
 
-                // Trigger complete autonomous emergency workflow
-                repository.confirmSos(triggerSource)
+                // Trigger 5-second verification countdown workflow with "I'm Safe" option
+                repository.triggerPossibleDistress("$triggerSource: $reason")
             }
         })
 
@@ -258,6 +261,12 @@ class RealAudioPipelineEngine(
         voskEngine.close()
 
         Log.i(TAG, "RealAudioPipelineEngine stopped.")
+    }
+
+    override fun onUserMarkedSafe() {
+        Log.i(TAG, "User marked safe. Resetting risk decision engine buffers & engaging 30s cooldown.")
+        decisionEngine.cancelAndReset(30000L)
+        voskEngine.clearTranscriptHistory()
     }
 
     private fun saveRollingAudioEvidenceSnapshot() {

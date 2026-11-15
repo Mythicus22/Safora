@@ -41,7 +41,6 @@ fun EmergencyScreen(
     val contacts by repository.contacts.collectAsState()
     val location by repository.currentLocation.collectAsState()
 
-    var showCancelDialog by remember { mutableStateOf(false) }
     var countdownSeconds by remember { mutableStateOf(5) }
 
     LaunchedEffect(incident.state) {
@@ -95,7 +94,9 @@ fun EmergencyScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // STAGE 1: VERIFYING COUNTDOWN
+        // =========================================================================
+        // STAGE 1: VERIFYING 5-SECOND COUNTDOWN WITH "I'M SAFE" BUTTON
+        // =========================================================================
         if (incident.state == IncidentState.VERIFYING) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -138,42 +139,62 @@ fun EmergencyScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = "Auto-triggering cellular SOS alerts & ESP32 cam in $countdownSeconds s",
+                        text = "Auto-triggering cellular SOS alerts & calls in $countdownSeconds s",
                         color = TextTertiary,
                         fontSize = 11.sp
                     )
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // Big Primary "I'M SAFE / CANCEL SOS" Button
+                    Button(
+                        onClick = {
+                            repository.cancelIncident()
+                            onDismissToDashboard()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSafe),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                repository.cancelIncident()
-                                onDismissToDashboard()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("False Alarm / I'm Safe", color = EmeraldSafe, fontSize = 11.sp)
-                        }
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Safe",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "I'M SAFE — CANCEL SOS ($countdownSeconds s)",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 15.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
 
-                        Button(
-                            onClick = {
-                                repository.confirmSos("USER_CONFIRMED_IMMEDIATE")
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = CrimsonEmergency),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("Confirm SOS", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Secondary Immediate SOS Confirmation (skip 5s wait)
+                    TextButton(
+                        onClick = {
+                            repository.confirmSos("USER_CONFIRMED_IMMEDIATE")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Send SOS Immediately (Bypass 5s Wait)",
+                            color = CrimsonEmergency,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
         } else {
-            // STAGE 2: CONFIRMED EMERGENCY SOS
+            // =========================================================================
+            // STAGE 2: CONFIRMED EMERGENCY SOS ACTIVE
+            // =========================================================================
             Text(
                 text = "EMERGENCY DISPATCH IN PROGRESS",
                 style = MaterialTheme.typography.titleLarge,
@@ -181,12 +202,43 @@ fun EmergencyScreen(
                 color = CrimsonEmergency
             )
             Text(
-                text = "Incident ID: ${incident.id} • Trigger: ${incident.triggerSource}",
+                text = "Incident ID: ${incident.id.ifBlank { "ACTIVE" }} • Trigger: ${incident.triggerSource}",
                 color = TextSecondary,
                 fontSize = 11.sp
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // PROMINENT "I AM SAFE" CANCELLATION BUTTON
+            Button(
+                onClick = {
+                    repository.resolveIncident()
+                    onDismissToDashboard()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSafe),
+                shape = RoundedCornerShape(14.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+            ) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "I AM SAFE — CANCEL & END SOS",
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp,
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Action: Direct Call 112
             Button(
@@ -198,9 +250,9 @@ fun EmergencyScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = CrimsonEmergency),
-                shape = RoundedCornerShape(14.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(Icons.Default.Phone, contentDescription = null, tint = Color.White)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -208,11 +260,11 @@ fun EmergencyScreen(
                     text = "CALL 112 (NATIONAL EMERGENCY)",
                     color = Color.White,
                     fontWeight = FontWeight.Black,
-                    fontSize = 14.sp
+                    fontSize = 13.sp
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Quick Alert Share Button
             OutlinedButton(
@@ -285,7 +337,7 @@ fun EmergencyScreen(
                     ) {
                         Text("Cellular SMS Alerts", color = TextSecondary, fontSize = 12.sp)
                         Text(
-                            "${contacts.count { it.isEmergencyContact }} Direct SMS Sent",
+                            "Dispatched to Contacts & 112",
                             color = EmeraldSafe,
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
@@ -308,91 +360,18 @@ fun EmergencyScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Live Timeline Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = CharcoalSurface),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "INCIDENT AUDIT LOG",
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    incident.timeline.forEach { entry ->
-                        Text(
-                            text = entry,
-                            color = TextPrimary,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Actions Row
-            Row(
+            // Action: View Evidence
+            OutlinedButton(
+                onClick = onNavigateToEvidence,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                shape = RoundedCornerShape(10.dp)
             ) {
-                OutlinedButton(
-                    onClick = onNavigateToEvidence,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("View Evidence", color = CyanAccent, fontSize = 12.sp)
-                }
-
-                Button(
-                    onClick = { showCancelDialog = true },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSafeDark),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("Resolve & End SOS", color = Color.White, fontSize = 12.sp)
-                }
+                Text("View Encrypted Evidence Segments", color = CyanAccent, fontSize = 12.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
-    }
-
-    if (showCancelDialog) {
-        AlertDialog(
-            onDismissRequest = { showCancelDialog = false },
-            title = { Text("Resolve Active Emergency?", color = TextPrimary) },
-            text = {
-                Text(
-                    "This will stop wearable recording, notify responders that you are safe, and archive the incident.",
-                    color = TextSecondary
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        repository.resolveIncident()
-                        showCancelDialog = false
-                        onDismissToDashboard()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSafeDark)
-                ) {
-                    Text("I Am Safe (Resolve)")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCancelDialog = false }) {
-                    Text("Keep Active")
-                }
-            },
-            containerColor = CharcoalSurfaceElevated
-        )
     }
 }

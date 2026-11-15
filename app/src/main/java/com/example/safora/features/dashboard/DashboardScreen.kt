@@ -60,13 +60,16 @@ fun DashboardScreen(
     val isDemoMode by repository.isDemoMode.collectAsState()
     val areAllModelsDownloaded by modelManager.areAllModelsDownloaded.collectAsState()
 
-    // Auto-query live GPS on dashboard launch and auto-start mic monitoring if models are ready
+    // Auto-query live GPS on dashboard launch and auto-start mic monitoring
     LaunchedEffect(Unit) {
         if (PermissionHelper.hasLocationPermission(context)) {
             val locationClient = SaforaLocationClient(context)
             locationClient.requestCurrentLocation()
+            if (PermissionHelper.isLocationHardwareEnabled(context)) {
+                locationClient.startLocationUpdates()
+            }
         }
-        if (modelManager.areAllDownloaded() && PermissionHelper.hasAudioPermission(context)) {
+        if (PermissionHelper.hasAudioPermission(context)) {
             AudioMonitoringService.start(context)
         }
     }

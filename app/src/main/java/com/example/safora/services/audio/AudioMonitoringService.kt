@@ -47,7 +47,7 @@ class AudioMonitoringService : Service() {
         }
     }
 
-    private val repository = SaforaRepository.instance
+    private val repository by lazy { SaforaRepository.getInstance(applicationContext) }
     private var activeEngine: AudioDetectionEngine? = null
 
     override fun onCreate() {
@@ -101,11 +101,13 @@ class AudioMonitoringService : Service() {
         Log.i(TAG, "Starting Audio Detection Pipeline with RealAudioPipelineEngine (Microphone, YAMNet, VAD, Vosk, Model 4)")
 
         // Always run the real production audio capture pipeline so microphone is live and listening
-        activeEngine = RealAudioPipelineEngine(this).apply {
+        val engine = RealAudioPipelineEngine(this).apply {
             startAnalysis { result ->
                 repository.updateAudioDetection(result)
             }
         }
+        activeEngine = engine
+        repository.setActiveAudioEngine(engine)
 
         repository.setAudioMonitoring(true)
         repository.logEmergencyTimeline("Acoustic Monitoring Service started with YAMNet & Vosk English.")
@@ -114,6 +116,7 @@ class AudioMonitoringService : Service() {
     private fun stopPipeline() {
         activeEngine?.stopAnalysis()
         activeEngine = null
+        repository.setActiveAudioEngine(null)
         repository.setAudioMonitoring(false)
         repository.logEmergencyTimeline("Acoustic Monitoring Service stopped.")
     }

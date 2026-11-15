@@ -60,6 +60,7 @@ class VoskSpeechRecognitionEngine(
     // Rolling transcript context with timestamps
     private val rollingTranscriptList = mutableListOf<Pair<Long, String>>()
     private var lastEmittedSentence: String = ""
+    private var lastPartialEmitTimeMs = 0L
 
     fun addListener(listener: VoskTranscriptListener) {
         synchronized(listeners) { listeners.add(listener) }
@@ -213,6 +214,9 @@ class VoskSpeechRecognitionEngine(
         }
         val bytes = byteBuffer.array()
 
+        val now = System.currentTimeMillis()
+        val shouldEmitPartial = (now - lastPartialEmitTimeMs) > 350L
+
         // Feed both recognizers under lock to avoid Kaldi native memory race conditions
         synchronized(recognizerLock) {
             if (isModelEnLoaded) {
@@ -224,7 +228,7 @@ class VoskSpeechRecognitionEngine(
                             if (!resultJson.isNullOrBlank()) {
                                 processVoskJson(resultJson, isFinal = true, language = "EN")
                             }
-                        } else {
+                        } else if (shouldEmitPartial) {
                             val partialJson = recognizer.partialResult
                             if (!partialJson.isNullOrBlank()) {
                                 processVoskJson(partialJson, isFinal = false, language = "EN")
@@ -245,7 +249,7 @@ class VoskSpeechRecognitionEngine(
                             if (!resultJson.isNullOrBlank()) {
                                 processVoskJson(resultJson, isFinal = true, language = "HI")
                             }
-                        } else {
+                        } else if (shouldEmitPartial) {
                             val partialJson = recognizer.partialResult
                             if (!partialJson.isNullOrBlank()) {
                                 processVoskJson(partialJson, isFinal = false, language = "HI")
@@ -255,6 +259,10 @@ class VoskSpeechRecognitionEngine(
                 } catch (e: Exception) {
                     Log.e(TAG, "Error processing HI audio frame: ${e.message}")
                 }
+            }
+
+            if (shouldEmitPartial) {
+                lastPartialEmitTimeMs = now
             }
         }
     }

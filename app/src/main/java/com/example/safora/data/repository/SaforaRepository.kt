@@ -3,10 +3,12 @@ package com.example.safora.data.repository
 import android.content.Context
 import com.example.safora.core.crypto.EvidenceCipher
 import com.example.safora.core.crypto.ShamirSecretSharing
+import com.example.safora.core.utils.AutonomousCallManager
 import com.example.safora.core.utils.EmergencyDispatcher
 import com.example.safora.data.local.MockDataProvider
 import com.example.safora.data.local.PreferencesManager
 import com.example.safora.data.model.*
+import com.example.safora.services.audio.AudioDetectionEngine
 import com.example.safora.services.cloud.BackblazeEvidenceUploader
 import com.example.safora.services.sos.EmergencySosService
 import kotlinx.coroutines.CoroutineScope
@@ -19,10 +21,15 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
+import kotlinx.coroutines.SupervisorJob
+import org.json.JSONArray
+import org.json.JSONObject
+
 class SaforaRepository(private val context: Context) {
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val prefsManager = PreferencesManager(context)
     private val b2Uploader = BackblazeEvidenceUploader(context)
+    private val incidentPrefs = context.getSharedPreferences("safora_incident_state", Context.MODE_PRIVATE)
 
     // Current user state
     private val _user = MutableStateFlow(User(name = "", phone = "", isOnboarded = false))
@@ -39,6 +46,70 @@ class SaforaRepository(private val context: Context) {
     // Incident state
     private val _currentIncident = MutableStateFlow(Incident())
     val currentIncident: StateFlow<Incident> = _currentIncident.asStateFlow()
+
+    // GPS Hardware state
+    private val _isGpsHardwareEnabled = MutableStateFlow(true)
+    val isGpsHardwareEnabled: StateFlow<Boolean> = _isGpsHardwareEnabled.asStateFlow()
+
+    fun setGpsHardwareEnabled(enabled: Boolean) {
+        _isGpsHardwareEnabled.value = enabled
+    }
+
+    private fun saveActiveIncident(incident: Incident) {
+        try {
+            val json = JSONObject().apply {
+                put("id", incident.id)
+                put("timestamp", incident.timestamp)
+                put("latitude", incident.latitude)
+                put("longitude", incident.longitude)
+                put("state", incident.state.name)
+                put("triggerSource", incident.triggerSource)
+                put("evidenceSegmentsCount", incident.evidenceSegmentsCount)
+                put("alertsSentCount", incident.alertsSentCount)
+                put("timeline", JSONArray(incident.timeline))
+                put("encryptionKeyHex", incident.encryptionKeyHex)
+                put("thresholdRequired", incident.thresholdRequired)
+                put("totalSharesCount", incident.totalSharesCount)
+            }.toString()
+            incidentPrefs.edit().putString("active_incident_json", json).apply()
+        } catch (e: Exception) {
+            android.util.Log.e("SaforaRepository", "Failed to persist active incident: ${e.message}")
+        }
+    }
+
+    private fun clearActiveIncident() {
+        incidentPrefs.edit().clear().apply()
+    }
+
+    private fun loadActiveIncident(): Incident? {
+        val json = incidentPrefs.getString("active_incident_json", null) ?: return null
+        return try {
+            val obj = JSONObject(json)
+            val timelineList = mutableListOf<String>()
+            val timelineArray = obj.optJSONArray("timeline")
+            if (timelineArray != null) {
+                for (i in 0 until timelineArray.length()) {
+                    timelineList.add(timelineArray.getString(i))
+                }
+            }
+            Incident(
+                id = obj.optString("id", ""),
+                timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                latitude = obj.optDouble("latitude", 28.6139),
+                longitude = obj.optDouble("longitude", 77.2090),
+                state = try { IncidentState.valueOf(obj.optString("state", "IDLE")) } catch (_: Exception) { IncidentState.IDLE },
+                triggerSource = obj.optString("triggerSource", "MANUAL"),
+                evidenceSegmentsCount = obj.optInt("evidenceSegmentsCount", 0),
+                alertsSentCount = obj.optInt("alertsSentCount", 0),
+                timeline = timelineList,
+                encryptionKeyHex = obj.optString("encryptionKeyHex", ""),
+                thresholdRequired = obj.optInt("thresholdRequired", 1),
+                totalSharesCount = obj.optInt("totalSharesCount", 1)
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     // Audio monitoring status
     private val _isAudioMonitoring = MutableStateFlow(false)
@@ -68,6 +139,12 @@ class SaforaRepository(private val context: Context) {
 
     fun updateAudioDiagnostics(transform: (AudioPipelineDiagnostics) -> AudioPipelineDiagnostics) {
         _audioDiagnostics.value = transform(_audioDiagnostics.value)
+    }
+
+    private var activeAudioEngine: AudioDetectionEngine? = null
+
+    fun setActiveAudioEngine(engine: AudioDetectionEngine?) {
+        activeAudioEngine = engine
     }
 
     // Location state
@@ -101,6 +178,17 @@ class SaforaRepository(private val context: Context) {
     private var incidentKeyBytes: ByteArray? = null
 
     init {
+        // Synchronously restore active incident if process was recreated or app was reopened during active SOS
+        val saved = loadActiveIncident()
+        if (saved != null && (saved.state == IncidentState.VERIFYING ||
+                              saved.state == IncidentState.CONFIRMED_SOS ||
+                              saved.state == IncidentState.ALERTS_SENT ||
+                              saved.state == IncidentState.EVIDENCE_SYNCING)
+        ) {
+            _currentIncident.value = saved
+            android.util.Log.i("SaforaRepository", "Restored persistent active SOS incident: ${saved.id} (${saved.state})")
+        }
+
         scope.launch {
             _user.value = prefsManager.userFlow.first()
             _contacts.value = prefsManager.contactsFlow.first()
@@ -198,13 +286,20 @@ class SaforaRepository(private val context: Context) {
         _currentIncident.value = _currentIncident.value.copy(
             timeline = _currentIncident.value.timeline + listOf(formatted)
         )
+        if (_currentIncident.value.state == IncidentState.VERIFYING ||
+            _currentIncident.value.state == IncidentState.CONFIRMED_SOS ||
+            _currentIncident.value.state == IncidentState.ALERTS_SENT ||
+            _currentIncident.value.state == IncidentState.EVIDENCE_SYNCING
+        ) {
+            saveActiveIncident(_currentIncident.value)
+        }
     }
 
     fun triggerPossibleDistress(detectedClass: String = "Scream / Distress Call") {
         if (_currentIncident.value.state == IncidentState.IDLE || _currentIncident.value.state == IncidentState.CANCELLED || _currentIncident.value.state == IncidentState.RESOLVED) {
             val incId = "INC-${System.currentTimeMillis().toString().takeLast(6)}"
             val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            _currentIncident.value = Incident(
+            val newIncident = Incident(
                 id = incId,
                 timestamp = System.currentTimeMillis(),
                 latitude = _currentLocation.value.first,
@@ -213,6 +308,8 @@ class SaforaRepository(private val context: Context) {
                 triggerSource = "VOICE_ML: $detectedClass",
                 timeline = listOf("[$timeStr] Acoustic distress pattern detected ($detectedClass)")
             )
+            _currentIncident.value = newIncident
+            saveActiveIncident(newIncident)
         }
     }
 
@@ -269,7 +366,7 @@ class SaforaRepository(private val context: Context) {
             )
         }
 
-        _currentIncident.value = Incident(
+        val confirmedIncident = Incident(
             id = incId,
             timestamp = System.currentTimeMillis(),
             latitude = _currentLocation.value.first,
@@ -282,6 +379,8 @@ class SaforaRepository(private val context: Context) {
             thresholdRequired = k,
             totalSharesCount = n
         )
+        _currentIncident.value = confirmedIncident
+        saveActiveIncident(confirmedIncident)
 
         // Automatically trigger recording command on wearable
         setWearableRecording(true)
@@ -309,28 +408,71 @@ class SaforaRepository(private val context: Context) {
             )
         }
 
+        // Also dispatch to 112 National Police / Emergency with clear formal notification
+        val police112Msg = EmergencyDispatcher.build112PoliceEmergencySmsText(
+            userName = _user.value.name.ifBlank { "Citizen in Distress" },
+            userPhone = _user.value.phone.ifBlank { "Unknown" },
+            latitude = _currentLocation.value.first,
+            longitude = _currentLocation.value.second,
+            incidentId = incId,
+            bloodGroup = _user.value.bloodGroup
+        )
+        EmergencyDispatcher.sendDirectSms(
+            context = context,
+            phoneNumber = "112",
+            message = police112Msg,
+            onSuccess = {
+                logEmergencyTimeline("Emergency SMS delivered to 112 National Emergency Helpline")
+            },
+            onError = { err ->
+                logEmergencyTimeline("112 SMS dispatch notice: $err")
+            }
+        )
+
         // Start Emergency Foreground Service (autonomous sequential calls & 3-min periodic GPS updates)
         EmergencySosService.start(context)
     }
 
     fun cancelIncident() {
         val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        _currentIncident.value = _currentIncident.value.copy(
-            state = IncidentState.CANCELLED,
-            timeline = _currentIncident.value.timeline + listOf("[$timeStr] Incident cancelled by user (Marked Safe)")
+        _currentIncident.value = Incident(
+            id = "",
+            state = IncidentState.IDLE,
+            timeline = listOf("[$timeStr] Incident cancelled by user (Marked Safe)")
         )
+        clearActiveIncident()
+        updateAudioDiagnostics { diag ->
+            diag.copy(
+                currentRiskLevel = RiskLevel.LOW,
+                riskDecisionReason = "User marked Safe. Continuous monitoring active.",
+                lastUpdatedTimestamp = System.currentTimeMillis()
+            )
+        }
         setWearableRecording(false)
+        AutonomousCallManager.stopAllCalls(context)
         EmergencySosService.stop(context)
+        activeAudioEngine?.onUserMarkedSafe()
     }
 
     fun resolveIncident() {
         val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        _currentIncident.value = _currentIncident.value.copy(
-            state = IncidentState.RESOLVED,
-            timeline = _currentIncident.value.timeline + listOf("[$timeStr] Incident marked RESOLVED. All alerts closed.")
+        _currentIncident.value = Incident(
+            id = "",
+            state = IncidentState.IDLE,
+            timeline = listOf("[$timeStr] Incident marked RESOLVED. All alerts closed.")
         )
+        clearActiveIncident()
+        updateAudioDiagnostics { diag ->
+            diag.copy(
+                currentRiskLevel = RiskLevel.LOW,
+                riskDecisionReason = "Incident resolved by user. Continuous monitoring active.",
+                lastUpdatedTimestamp = System.currentTimeMillis()
+            )
+        }
         setWearableRecording(false)
+        AutonomousCallManager.stopAllCalls(context)
         EmergencySosService.stop(context)
+        activeAudioEngine?.onUserMarkedSafe()
     }
 
     fun addContact(contact: Contact) {
